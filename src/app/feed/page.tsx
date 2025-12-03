@@ -37,6 +37,7 @@ export default function FeedPage() {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [swipeDirection, setSwipeDirection] = useState<"left" | "right" | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [matches, setMatches] = useState<MatchWithProfile[]>([]);
   const [showMatchesDropdown, setShowMatchesDropdown] = useState(false);
   const [newMatchProfile, setNewMatchProfile] = useState<UserProfile | null>(null);
@@ -74,20 +75,143 @@ export default function FeedPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Get current user
+  // Get current user and their profile
   useEffect(() => {
     async function getCurrentUser() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setCurrentUserId(user.id);
+        
+        // Fetch current user's profile for preference matching
+        const { data: profile } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .eq("user_id", user.id)
+          .single();
+        
+        if (profile) {
+          console.log("Current user profile loaded:", {
+            gender: profile.gender,
+            preferences: profile.onboarding_preferences,
+          });
+          setCurrentUserProfile(profile);
+        } else {
+          // No profile found, set to a marker so we know loading is done
+          setCurrentUserProfile(null);
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
       }
     }
     getCurrentUser();
   }, [supabase]);
 
-  // Fetch profiles with ready agents (excluding current user)
+  // Helper: Normalize gender terms to a common format
+  const normalizeGender = (value: string): string => {
+    const v = value.toLowerCase().trim();
+    
+    // Map various terms to standard values
+    if (["woman", "women", "female", "f", "girl"].includes(v)) return "female";
+    if (["man", "men", "male", "m", "boy", "guy"].includes(v)) return "male";
+    if (["non-binary", "nonbinary", "nb", "enby", "non binary"].includes(v)) return "non-binary";
+    if (["any", "everyone", "all", "both"].includes(v)) return "any";
+    
+    return v; // Return as-is if no match
+  };
+
+  // Helper: Check if a gender matches a preference
+  const genderMatchesPreference = (
+    gender: string | undefined | null,
+    preference: string | string[] | undefined | null
+  ): boolean => {
+    // If no preference set, match everyone
+    if (!preference) return true;
+    if (!gender) return false;
+
+    const normalizedGender = normalizeGender(gender);
+    
+    // Handle array of preferences
+    if (Array.isArray(preference)) {
+      return preference.some((p) => {
+        const normalizedPref = normalizeGender(p);
+        return normalizedPref === normalizedGender || normalizedPref === "any";
+      });
+    }
+    
+    // Handle single preference
+    const normalizedPref = normalizeGender(preference);
+    return normalizedPref === normalizedGender || normalizedPref === "any";
+  };
+
+  // Check if two profiles are compatible based on preferences
+  const areProfilesCompatible = (
+    myProfile: UserProfile,
+    theirProfile: UserProfile
+  ): boolean => {
+    const myPrefs = myProfile.onboarding_preferences;
+    const theirPrefs = theirProfile.onboarding_preferences;
+
+    // Check if I'm looking for their gender
+    const iWantThem = genderMatchesPreference(
+      theirProfile.gender,
+      myPrefs?.partner_gender
+    );
+
+    // Check if they're looking for my gender
+    const theyWantMe = genderMatchesPreference(
+      myProfile.gender,
+      theirPrefs?.partner_gender
+    );
+
+    // Check age preferences (optional)
+    let ageCompatible = true;
+    
+    // Check if their age is in my preferred range
+    if (myPrefs?.partner_age_range && theirProfile.age) {
+      const { min, max } = myPrefs.partner_age_range;
+      if (min && theirProfile.age < min) ageCompatible = false;
+      if (max && theirProfile.age > max) ageCompatible = false;
+    }
+
+    // Check if my age is in their preferred range
+    if (theirPrefs?.partner_age_range && myProfile.age) {
+      const { min, max } = theirPrefs.partner_age_range;
+      if (min && myProfile.age < min) ageCompatible = false;
+      if (max && myProfile.age > max) ageCompatible = false;
+    }
+
+    const isCompatible = iWantThem && theyWantMe && ageCompatible;
+
+    // Debug logging
+    console.log(`Checking ${theirProfile.display_name}:`, {
+      theirGender: theirProfile.gender,
+      myLookingFor: myPrefs?.partner_gender,
+      iWantThem,
+      myGender: myProfile.gender,
+      theirLookingFor: theirPrefs?.partner_gender,
+      theyWantMe,
+      ageCompatible,
+      result: isCompatible ? "✅ SHOW" : "❌ HIDE",
+    });
+
+    return isCompatible;
+  };
+
+  // Fetch profiles with ready agents (excluding current user, filtered by preferences)
   useEffect(() => {
     async function fetchProfiles() {
+      // Don't fetch until we have the current user's profile for filtering
+      if (!currentUserProfile) {
+        console.log("Waiting for current user profile to load before fetching feed...");
+        return;
+      }
+
+      console.log("Fetching profiles with preferences:", {
+        myGender: currentUserProfile.gender,
+        myLookingFor: currentUserProfile.onboarding_preferences?.partner_gender,
+      });
+
       try {
         let query = supabase
           .from("user_profiles")
@@ -108,7 +232,16 @@ export default function FeedPage() {
           return;
         }
 
-        setProfiles(data || []);
+        console.log(`Found ${data?.length || 0} profiles, filtering by preferences...`);
+
+        // Filter profiles based on mutual compatibility
+        const filteredProfiles = (data || []).filter((profile) =>
+          areProfilesCompatible(currentUserProfile, profile)
+        );
+
+        console.log(`After filtering: ${filteredProfiles.length} compatible profiles`);
+
+        setProfiles(filteredProfiles);
       } catch (err) {
         console.error("Error:", err);
         toast.error("Something went wrong");
@@ -117,10 +250,11 @@ export default function FeedPage() {
       }
     }
 
-    if (currentUserId !== null) {
+    // Only fetch when we have both user ID and their profile loaded
+    if (currentUserId && currentUserProfile) {
       fetchProfiles();
     }
-  }, [supabase, currentUserId]);
+  }, [supabase, currentUserId, currentUserProfile]);
 
   // Fetch matches
   const fetchMatches = useCallback(async () => {
