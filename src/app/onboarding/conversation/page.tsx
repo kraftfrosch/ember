@@ -251,16 +251,37 @@ export default function ConversationPage() {
         headers["Authorization"] = `Bearer ${session.access_token}`;
       }
 
+      // Fetch actual profile data from DB (context may be stale after refresh)
+      let userName = data.displayName || "User";
+      let userAge = data.age;
+      let userGender = data.gender;
+      let userLookingFor = data.lookingFor;
+
+      if (session?.user?.id) {
+        const { data: profile } = await supabase
+          .from("user_profiles")
+          .select("display_name, age, gender, onboarding_preferences")
+          .eq("user_id", session.user.id)
+          .single();
+
+        if (profile) {
+          userName = profile.display_name || userName;
+          userAge = profile.age?.toString() || userAge;
+          userGender = profile.gender || userGender;
+          userLookingFor = profile.onboarding_preferences?.looking_for || userLookingFor;
+        }
+      }
+
       const response = await fetch("/api/onboarding/analyze", {
         method: "POST",
         headers,
         body: JSON.stringify({
           conversationId: id,
           userInfo: {
-            name: data.displayName,
-            age: data.age,
-            gender: data.gender,
-            lookingFor: data.lookingFor,
+            name: userName,
+            age: userAge,
+            gender: userGender,
+            lookingFor: userLookingFor,
           },
         }),
       });
