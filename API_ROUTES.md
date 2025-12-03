@@ -14,6 +14,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 NEXT_PUBLIC_ONBOARDING_AGENT_ID=your_onboarding_agent_id
+ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
 ## Authentication

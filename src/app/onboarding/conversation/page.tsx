@@ -12,6 +12,7 @@ export default function ConversationPage() {
   const { data, updateData, nextStep } = useOnboarding();
   const [hasStarted, setHasStarted] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
 
   const conversation = useConversation({
     onConnect: () => console.log("Connected to onboarding agent"),
@@ -36,9 +37,10 @@ export default function ConversationPage() {
         return;
       }
 
-      await conversation.startSession({
+      const id = await conversation.startSession({
         agentId,
       });
+      setConversationId(id);
       setHasStarted(true);
     } catch (error) {
       console.error("Failed to start conversation:", error);
@@ -47,44 +49,48 @@ export default function ConversationPage() {
   }, [conversation]);
 
   const endConversation = async () => {
+    // Use the stored conversationId
+    if (!conversationId) {
+      console.error("No conversation ID found");
+      toast.error("Could not retrieve conversation details. Please try again.");
+      return;
+    }
+
     await conversation.endSession();
-    handleAnalysis();
+    handleAnalysis(conversationId);
   };
 
-  const handleAnalysis = async () => {
+  const handleAnalysis = async (id: string) => {
     setIsAnalyzing(true);
     try {
-      // In a real implementation, we would get the transcript or conversation ID
-      // from the SDK or callbacks. For now, we'll assume the backend can 
-      // retrieve the session or we pass the conversation ID.
-      // Since the React SDK doesn't always expose the transcript directly in the hook
-      // without some configuration, we will mock the "transcript" or conversation ID passing.
-      
-      const conversationId = conversation.conversationId;
-      
+      // Short delay to allow backend to index/process the audio/transcript
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
       const response = await fetch("/api/onboarding/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conversationId,
-          // Pass basic data to help context if needed
+          conversationId: id,
           userInfo: {
             name: data.displayName,
             age: data.age,
             gender: data.gender,
-            lookingFor: data.lookingFor
-          }
+            lookingFor: data.lookingFor,
+          },
         }),
       });
 
-      if (!response.ok) throw new Error("Analysis failed");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Analysis failed");
+      }
 
       const result = await response.json();
-      
+
       // Update context with the analyzed prompts
       updateData({
         ...data,
-        ...result // Should contain user_profile_prompt, etc.
+        ...result, // Should contain user_profile_prompt, etc.
       });
 
       // Move to completion/feed
@@ -210,4 +216,3 @@ export default function ConversationPage() {
     </div>
   );
 }
-

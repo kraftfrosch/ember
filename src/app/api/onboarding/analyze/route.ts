@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { elevenFetch } from "@/lib/elevenlabs-client";
+import { anthropic } from "@ai-sdk/anthropic";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 /**
  * POST /api/onboarding/analyze
@@ -8,10 +11,6 @@ import { elevenFetch } from "@/lib/elevenlabs-client";
  */
 export async function POST(request: NextRequest) {
   try {
-    // 1. Auth check (optional but recommended if we had auth middleware)
-    // For onboarding, the user might be anonymous or just signed up.
-    // Ideally we pass the Supabase session token.
-    
     const body = await request.json();
     const { conversationId, userInfo } = body;
 
@@ -22,110 +21,125 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Fetch transcript from ElevenLabs
-    // We need to wait a moment for the conversation to be indexed/available sometimes
-    // or use the get conversation endpoint
-    
+    // 1. Fetch transcript from ElevenLabs
     let transcriptText = "";
-    
+
     try {
-        const transcriptRes = await elevenFetch(`/v1/convai/conversations/${conversationId}`);
-        const transcriptData = await transcriptRes.json();
-        
-        // Extract transcript
-        // Note: The actual structure of the transcript response depends on ElevenLabs API version
-        // Assuming it returns an array of messages or similar.
-        // For now, if we can't get the full transcript, we'll fall back to a basic profile generation.
-        if (transcriptData.transcript) {
-            transcriptText = transcriptData.transcript.map((t: any) => `${t.role}: ${t.message}`).join("\n");
-        }
+      const transcriptRes = await elevenFetch(
+        `/v1/convai/conversations/${conversationId}`
+      );
+      const transcriptData = await transcriptRes.json();
+
+      if (
+        transcriptData.transcript &&
+        Array.isArray(transcriptData.transcript)
+      ) {
+        // Map the transcript items to a readable string
+        transcriptText = transcriptData.transcript
+          .map((t) => `${t.role.toUpperCase()}: ${t.message}`)
+          .join("\n");
+      } else {
+        console.warn("No transcript found in response", transcriptData);
+        throw new Error("No transcript available");
+      }
     } catch (e) {
-        console.warn("Could not fetch transcript:", e);
-        // Fallback: Continue with just user info
+      console.error("Could not fetch transcript:", e);
+      return NextResponse.json(
+        { error: "Failed to retrieve conversation transcript" },
+        { status: 500 }
+      );
     }
 
-    // 3. Analyze with LLM (Simulated for now)
-    // In a real app, you would call OpenAI/Anthropic here:
-    /*
-    const completion = await openai.chat.completions.create({
-      messages: [
-        { role: "system", content: "Analyze this dating profile interview..." },
-        { role: "user", content: transcriptText }
-      ]
-    });
-    */
-
-    // MOCK ANALYSIS LOGIC
-    // We'll generate prompts based on the user info and whatever transcript we have
-    
+    // 2. Analyze with Vercel AI SDK (Anthropic)
     const { name, age, gender, lookingFor } = userInfo || {};
-    
-    const user_profile_prompt = `
-      Name: ${name}
-      Age: ${age}
-      Gender: ${gender}
-      
-      Personality Summary:
-      (Generated from interview)
-      ${name} appears to be an outgoing and friendly individual who values authentic connections. 
-      They enjoy casual conversation and have a warm demeanor.
-    `.trim();
 
-    const user_preferences_prompt = `
-      Looking for: ${lookingFor}
-      
-      Preferences Summary:
-      (Generated from interview)
-      They are interested in meeting ${lookingFor} who share similar values. 
-      They appreciate honesty and good communication.
-    `.trim();
-
-    const user_important_notes = `
-      Notes:
-      - Has completed the voice onboarding interview.
-      - Expressed interest in long-term relationships.
-    `.trim();
-
-    // 4. Update User Profile in Supabase (if user is authenticated)
-    // Since we didn't enforce auth in this specific route for the "flow",
-    // we return the data to the client to store or the client calls an update endpoint.
-    // However, usually onboarding happens *after* signup.
-    // If the client sent an Auth header, we could update it here.
-    
-    // Check for Auth header
-    const authHeader = request.headers.get("authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-        const token = authHeader.replace("Bearer ", "");
-        const { data: { user } } = await supabaseAdmin.auth.getUser(token);
-        
-        if (user) {
-            await supabaseAdmin.from("user_profiles").upsert({
-                user_id: user.id,
-                display_name: name,
-                age: parseInt(age),
-                gender: gender,
-                user_profile_prompt,
-                user_preferences_prompt,
-                user_important_notes,
-                onboarding_completed: true,
-                updated_at: new Date().toISOString()
-            });
-        }
-    }
-
-    return NextResponse.json({
-      success: true,
-      user_profile_prompt,
-      user_preferences_prompt,
-      user_important_notes
+    // Schema for the output
+    const schema = z.object({
+      user_profile_prompt: z
+        .string()
+        .describe(
+          "A detailed summary of the user's personality, background, and dating profile based on the conversation."
+        ),
+      user_preferences_prompt: z
+        .string()
+        .describe(
+          "A detailed summary of what the user is looking for in a partner."
+        ),
+      user_important_notes: z
+        .string()
+        .describe(
+          "Any specific dealbreakers, important life details, or other notes mentioned."
+        ),
     });
 
+    const systemPrompt = `
+      You are an expert dating profile consultant. 
+      Your task is to analyze a transcript of an onboarding interview for a voice-first dating app.
+      
+      User Basic Info:
+      - Name: ${name}
+      - Age: ${age}
+      - Gender: ${gender}
+      - Looking For: ${lookingFor}
+      
+      Extract the relevant information to create three specific prompts that will be used to instruct an AI agent representing this user.
+      
+      1. user_profile_prompt: Describe the user's personality, hobbies, vibe, and how they speak. This helps the agent act like them.
+      2. user_preferences_prompt: Describe exactly who they want to meet.
+      3. user_important_notes: Capture any dealbreakers or specific constraints.
+      
+      If the transcript is short or missing details, infer reasonable defaults based on the basic info, but keep it brief.
+    `;
+
+    try {
+      const { object } = await generateObject({
+        model: anthropic("claude-sonnet-4-5"),
+        schema: schema,
+        system: systemPrompt,
+        prompt: `Here is the interview transcript:\n\n${transcriptText}`,
+      });
+
+      console.log("AI Analysis result:", object);
+
+      // 3. Update User Profile in Supabase
+      const authHeader = request.headers.get("authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "");
+        const {
+          data: { user },
+        } = await supabaseAdmin.auth.getUser(token);
+
+        if (user) {
+          await supabaseAdmin.from("user_profiles").upsert({
+            user_id: user.id,
+            display_name: name,
+            age: parseInt(age),
+            gender: gender,
+            user_profile_prompt: object.user_profile_prompt,
+            user_preferences_prompt: object.user_preferences_prompt,
+            user_important_notes: object.user_important_notes,
+            onboarding_completed: true,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        ...object,
+      });
+    } catch (aiError) {
+      console.error("AI Analysis failed:", aiError);
+      return NextResponse.json(
+        { error: "Failed to analyze conversation" },
+        { status: 500 }
+      );
+    }
   } catch (error) {
-    console.error("Analysis error:", error);
+    console.error("Analysis route error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
     );
   }
 }
-
