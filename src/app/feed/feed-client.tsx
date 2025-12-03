@@ -527,10 +527,12 @@ export default function FeedClient({ user }: FeedClientProps) {
               onClick={() => setShowMatchesDropdown(!showMatchesDropdown)}
               className="flex items-center gap-1 group"
             >
-              <div className="w-10 h-10 rounded-md bg-secondary flex items-center justify-center overflow-hidden hover:bg-secondary/80 transition-colors relative">
-                <Sparkles className="w-5 h-5 text-foreground" />
+              <div className="relative">
+                <div className="w-10 h-10 rounded-md bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors">
+                  <Sparkles className="w-5 h-5 text-foreground" />
+                </div>
                 {matches.length > 0 && (
-                  <div className="absolute -top-1 -right-1 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                  <div className="absolute -top-2 -right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center border-2 border-background">
                     <span className="text-[10px] font-bold text-primary-foreground">{matches.length}</span>
                   </div>
                 )}
