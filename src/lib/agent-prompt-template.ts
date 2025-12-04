@@ -90,5 +90,5 @@ export function generateAgentPrompt(variables: AgentPromptVariables): string {
  * Generates a default first message for the agent
  */
 export function generateDefaultFirstMessage(displayName: string): string {
-  return `Hey, I'm ${displayName}.`;
+  return `Hey there, I'm ${displayName}. Exciting to get to know you! What's been on your mind today?`;
 }
