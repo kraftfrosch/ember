@@ -18,12 +18,14 @@ function LoginForm() {
   });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const [supabase] = useState(() => createSupabaseClient());
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError(null);
 
     try {
       if (isSignUp) {
@@ -66,10 +68,10 @@ function LoginForm() {
         }
         router.refresh();
       }
-    } catch (error: unknown) {
-      toast.error(
-        error instanceof Error ? error.message : "Authentication failed"
-      );
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Authentication failed";
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -97,6 +99,12 @@ function LoginForm() {
       </div>
 
       <form onSubmit={handleAuth} className="space-y-6">
+        {error && (
+          <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm text-center">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input
