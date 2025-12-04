@@ -973,7 +973,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                         className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground py-4 rounded-md font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-sm"
                       >
                         <Mic className="w-5 h-5" />
-                        Talk to Agent
+                        Talk
                       </button>
 
                       <button
@@ -1457,7 +1457,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                     className="flex-1 py-4 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
                   >
                     <Mic className="w-5 h-5" />
-                    Talk to Agent
+                    Talk
                   </button>
                   <button
                     onClick={() => {
