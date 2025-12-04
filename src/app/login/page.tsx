@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
-import { Logo } from "@/components/logo";
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -83,8 +82,14 @@ function LoginForm() {
       className="max-w-md w-full bg-card rounded-xl shadow-2xl shadow-primary/5 overflow-hidden p-8 space-y-8 border border-border/50"
     >
       <div className="text-center space-y-2">
-        <div className="flex justify-center mb-2">
-          <Logo width={180} height={55} />
+        <div className="flex justify-center mb-4">
+          <img
+            src="/logo-color.png"
+            alt="ewyber"
+            width={180}
+            height={55}
+            className="mx-auto"
+          />
         </div>
         <p className="text-muted-foreground">
           {isSignUp ? "Create your account" : "Welcome back"}

@@ -43,6 +43,16 @@ export default function ConversationPage() {
     setCurrentStep(4);
   }, [setCurrentStep]);
 
+  // Prevent body scrolling
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    document.body.style.height = '100vh';
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.height = '';
+    };
+  }, []);
+
   // Audio recording refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -307,8 +317,8 @@ export default function ConversationPage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-between p-8 text-center">
-      <div className="flex-1 flex flex-col items-center justify-start pt-4 space-y-8 w-full">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center overflow-hidden">
+      <div className="flex flex-col items-center justify-center space-y-8 w-full">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -325,7 +335,7 @@ export default function ConversationPage() {
         </motion.div>
 
         {/* Visualizer Circle */}
-        <div className="relative w-56 h-56 flex items-center justify-center my-8">
+        <div className="relative w-56 h-56 flex items-center justify-center">
           <AnimatePresence>
             {status === "connected" && (
               <>
@@ -339,7 +349,7 @@ export default function ConversationPage() {
                     duration: 2,
                     ease: "easeInOut",
                   }}
-                  className="absolute inset-0 bg-gradient-to-r from-[#17FCB0] to-[#1763FC] rounded-full blur-[60px]"
+                  className="absolute inset-0 bg-gradient-to-r from-[#f26634] to-[#f1a3a8] rounded-full blur-[60px]"
                 />
                 <motion.div
                   animate={{
@@ -350,13 +360,17 @@ export default function ConversationPage() {
                     duration: 1,
                     ease: "easeInOut",
                   }}
-                  className="absolute inset-4 bg-gradient-to-tr from-[#17FCB0] to-[#1763FC] rounded-full opacity-30 blur-xl"
+                  className="absolute inset-4 bg-gradient-to-tr from-[#f26634] to-[#f1a3a8] rounded-full opacity-30 blur-xl"
                 />
               </>
             )}
           </AnimatePresence>
 
-          <div className="relative z-10 w-40 h-40 bg-card rounded-full shadow-2xl shadow-primary/10 flex items-center justify-center border border-white/20 backdrop-blur-sm">
+          <button
+            onClick={!hasStarted ? startConversation : undefined}
+            disabled={hasStarted}
+            className="relative z-10 w-40 h-40 bg-card rounded-full shadow-2xl shadow-primary/10 flex items-center justify-center border border-white/20 backdrop-blur-sm cursor-pointer hover:scale-105 transition-transform disabled:cursor-default disabled:hover:scale-100"
+          >
             {status === "connected" ? (
               <motion.div
                 animate={{
@@ -376,53 +390,50 @@ export default function ConversationPage() {
                       duration: 0.4,
                       delay: i * 0.1,
                     }}
-                    className="w-2 bg-gradient-to-b from-[#17FCB0] to-[#1763FC] rounded-full"
+                    className="w-2 bg-gradient-to-b from-[#f26634] to-[#f1a3a8] rounded-full"
                   />
                 ))}
               </motion.div>
             ) : (
               <Mic className="w-12 h-12 text-muted-foreground/50" />
             )}
-          </div>
+          </button>
         </div>
-      </div>
 
-      <div className="w-full space-y-4">
-        {!hasStarted ? (
-          <Button
-            onClick={startConversation}
-            className="w-full py-8 text-lg rounded-md bg-primary hover:bg-primary/90 text-primary-foreground shadow-xl shadow-primary/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Start Conversation
-          </Button>
-        ) : (
-          <div className="relative w-full">
-            <Button
-              onClick={endConversation}
-              disabled={isAnalyzing || !canEnd}
-              variant="outline"
-              className="w-full py-8 text-lg rounded-md bg-secondary hover:bg-secondary/80 text-foreground border-transparent shadow-sm transition-all duration-200"
-            >
-              {isAnalyzing ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  Creating Profile...
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <PhoneOff className="w-5 h-5" />
-                  Finish & Create Profile
-                </span>
+        {hasStarted && (
+          <div className="w-full space-y-4 mt-8">
+            <div className="relative w-full">
+              <Button
+                onClick={endConversation}
+                disabled={isAnalyzing || !canEnd}
+                variant="outline"
+                className={`w-full py-8 text-lg rounded-md border-transparent shadow-sm transition-all duration-200 ${
+                  canEnd
+                    ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    : "bg-secondary hover:bg-secondary/80 text-foreground"
+                }`}
+              >
+                {isAnalyzing ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    Creating Profile...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <PhoneOff className="w-5 h-5" />
+                    Finish & Create Profile
+                  </span>
+                )}
+              </Button>
+              {!canEnd && (
+                <div
+                  className="absolute inset-0 rounded-md pointer-events-none border-2 border-primary z-20 transition-all duration-100 ease-linear"
+                  style={{
+                    clipPath: `inset(0 ${100 - progress}% 0 0)`,
+                  }}
+                />
               )}
-            </Button>
-            {!canEnd && (
-              <div
-                className="absolute inset-0 rounded-md pointer-events-none border-2 border-primary z-20 transition-all duration-100 ease-linear"
-                style={{
-                  clipPath: `inset(0 ${100 - progress}% 0 0)`,
-                }}
-              />
-            )}
+            </div>
           </div>
         )}
       </div>
