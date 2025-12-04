@@ -84,14 +84,13 @@ export default function FeedClient({ user }: FeedClientProps) {
 
   const currentProfile = profiles[currentIndex] || null;
 
-
   // Prevent body scrolling on mobile
   useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    document.body.style.height = '100vh';
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100vh";
     return () => {
-      document.body.style.overflow = '';
-      document.body.style.height = '';
+      document.body.style.overflow = "";
+      document.body.style.height = "";
     };
   }, []);
 
@@ -104,7 +103,10 @@ export default function FeedClient({ user }: FeedClientProps) {
       toast.success(`Connected to ${currentProfile?.display_name}'s agent`);
     },
     onDisconnect: () => {
-      console.log("Disconnected from agent, callStartTimeRef:", callStartTimeRef.current);
+      console.log(
+        "Disconnected from agent, callStartTimeRef:",
+        callStartTimeRef.current
+      );
       // Duration is now calculated in endCall, so we just log here
     },
     onError: (error) => {
@@ -167,12 +169,55 @@ export default function FeedClient({ user }: FeedClientProps) {
   // Helper: Normalize gender terms to a common format
   const normalizeGender = (value: string): string => {
     const v = value.toLowerCase().trim();
-    if (["woman", "women", "female", "f", "girl", "girls", "lady", "ladies"].includes(v)) return "female";
-    if (["man", "men", "male", "m", "boy", "guy", "guys", "gentleman", "gentlemen"].includes(v)) return "male";
-    if (["non-binary", "nonbinary", "nb", "enby", "non binary", "other"].includes(v))
+    if (
+      [
+        "woman",
+        "women",
+        "female",
+        "f",
+        "girl",
+        "girls",
+        "lady",
+        "ladies",
+      ].includes(v)
+    )
+      return "female";
+    if (
+      [
+        "man",
+        "men",
+        "male",
+        "m",
+        "boy",
+        "guy",
+        "guys",
+        "gentleman",
+        "gentlemen",
+      ].includes(v)
+    )
+      return "male";
+    if (
+      ["non-binary", "nonbinary", "nb", "enby", "non binary", "other"].includes(
+        v
+      )
+    )
       return "non-binary";
-    if (["any", "everyone", "all", "both", "anyone", "everybody", "open", "no preference"].includes(v)) return "any";
-    console.log(`[Matching] Unknown gender/preference value: "${value}" (normalized: "${v}")`);
+    if (
+      [
+        "any",
+        "everyone",
+        "all",
+        "both",
+        "anyone",
+        "everybody",
+        "open",
+        "no preference",
+      ].includes(v)
+    )
+      return "any";
+    console.log(
+      `[Matching] Unknown gender/preference value: "${value}" (normalized: "${v}")`
+    );
     return v;
   };
 
@@ -207,7 +252,8 @@ export default function FeedClient({ user }: FeedClientProps) {
 
     // Check both possible field names: looking_for (from onboarding) or partner_gender
     const myLookingFor = myPrefs?.looking_for || myPrefs?.partner_gender;
-    const theirLookingFor = theirPrefs?.looking_for || theirPrefs?.partner_gender;
+    const theirLookingFor =
+      theirPrefs?.looking_for || theirPrefs?.partner_gender;
 
     const iWantThem = genderMatchesPreference(
       theirProfile.gender,
@@ -236,12 +282,16 @@ export default function FeedClient({ user }: FeedClientProps) {
       theirGender: theirProfile.gender,
       theirGenderNormalized: normalizeGender(theirProfile.gender || ""),
       myLookingFor,
-      myLookingForNormalized: myLookingFor ? normalizeGender(String(myLookingFor)) : null,
+      myLookingForNormalized: myLookingFor
+        ? normalizeGender(String(myLookingFor))
+        : null,
       iWantThem,
       myGender: myProfile.gender,
       myGenderNormalized: normalizeGender(myProfile.gender || ""),
       theirLookingFor,
-      theirLookingForNormalized: theirLookingFor ? normalizeGender(String(theirLookingFor)) : null,
+      theirLookingForNormalized: theirLookingFor
+        ? normalizeGender(String(theirLookingFor))
+        : null,
       theyWantMe,
       ageCompatible,
       result: isCompatible ? "✅ SHOW" : "❌ HIDE",
@@ -266,14 +316,16 @@ export default function FeedClient({ user }: FeedClientProps) {
         myGender: currentUserProfile.gender,
         myGenderNormalized: normalizeGender(currentUserProfile.gender || ""),
         myLookingFor: myLookingFor,
-        myLookingForNormalized: myLookingFor ? normalizeGender(String(myLookingFor)) : null,
+        myLookingForNormalized: myLookingFor
+          ? normalizeGender(String(myLookingFor))
+          : null,
         fullPrefs: myPrefs,
       });
 
       try {
         // Get users I've matched with (mutual likes) to exclude from feed
         const matchedUserIds: string[] = [];
-        
+
         if (currentUserId) {
           // Get users I've liked
           const { data: myLikes } = await supabase
@@ -297,7 +349,9 @@ export default function FeedClient({ user }: FeedClientProps) {
           }
         }
 
-        console.log(`Excluding ${matchedUserIds.length} matched users from feed`);
+        console.log(
+          `Excluding ${matchedUserIds.length} matched users from feed`
+        );
 
         let query = supabase
           .from("user_profiles")
@@ -362,25 +416,28 @@ export default function FeedClient({ user }: FeedClientProps) {
 
       if (likesError) {
         // Fallback: try without call_duration_seconds column (if it doesn't exist yet)
-        console.warn("Fetching likes with duration failed, trying without:", likesError);
+        console.warn(
+          "Fetching likes with duration failed, trying without:",
+          likesError
+        );
         const { data: fallbackLikes, error: fallbackError } = await supabase
           .from("user_likes")
           .select("to_user_id")
           .eq("from_user_id", currentUserId);
-        
+
         if (fallbackError) {
           console.error("Error fetching likes:", fallbackError);
           return;
         }
-        
+
         // Continue with fallback data (no duration)
         if (!fallbackLikes || fallbackLikes.length === 0) {
           setMatches([]);
           return;
         }
-        
+
         const likedUserIds = fallbackLikes.map((l) => l.to_user_id);
-        
+
         const { data: mutualLikes, error: mutualError } = await supabase
           .from("user_likes")
           .select("from_user_id, created_at")
@@ -401,7 +458,9 @@ export default function FeedClient({ user }: FeedClientProps) {
 
         const matchesWithProfiles: MatchWithProfile[] = mutualLikes
           .map((like): MatchWithProfile | null => {
-            const profile = matchedProfiles?.find((p) => p.user_id === like.from_user_id);
+            const profile = matchedProfiles?.find(
+              (p) => p.user_id === like.from_user_id
+            );
             if (!profile) return null;
             return {
               user_id: currentUserId,
@@ -411,7 +470,11 @@ export default function FeedClient({ user }: FeedClientProps) {
             };
           })
           .filter((m): m is MatchWithProfile => m !== null)
-          .sort((a, b) => new Date(b.matched_at).getTime() - new Date(a.matched_at).getTime());
+          .sort(
+            (a, b) =>
+              new Date(b.matched_at).getTime() -
+              new Date(a.matched_at).getTime()
+          );
 
         setMatches(matchesWithProfiles);
         return;
@@ -469,7 +532,8 @@ export default function FeedClient({ user }: FeedClientProps) {
       // Count unreads per conversation
       const unreadByConversation: Record<string, number> = {};
       unreadCounts?.forEach((msg) => {
-        unreadByConversation[msg.conversation_id] = (unreadByConversation[msg.conversation_id] || 0) + 1;
+        unreadByConversation[msg.conversation_id] =
+          (unreadByConversation[msg.conversation_id] || 0) + 1;
       });
 
       const matchesWithProfiles: MatchWithProfile[] = mutualLikes
@@ -478,19 +542,22 @@ export default function FeedClient({ user }: FeedClientProps) {
             (p) => p.user_id === like.from_user_id
           );
           if (!profile) return null;
-          
+
           // Find my like to get my call duration
-          const myLike = myLikes.find((l) => l.to_user_id === like.from_user_id);
+          const myLike = myLikes.find(
+            (l) => l.to_user_id === like.from_user_id
+          );
           const myCallDuration = myLike?.call_duration_seconds || 0;
           const theirCallDuration = like.call_duration_seconds || 0;
 
           // Find conversation for this match
           const conversation = conversations?.find(
             (c) =>
-              (c.user1_id === currentUserId && c.user2_id === like.from_user_id) ||
+              (c.user1_id === currentUserId &&
+                c.user2_id === like.from_user_id) ||
               (c.user2_id === currentUserId && c.user1_id === like.from_user_id)
           );
-          
+
           return {
             user_id: currentUserId,
             matched_with_user_id: like.from_user_id,
@@ -500,7 +567,9 @@ export default function FeedClient({ user }: FeedClientProps) {
             their_call_duration_seconds: theirCallDuration,
             total_call_duration_seconds: myCallDuration + theirCallDuration,
             conversation_id: conversation?.id,
-            unread_count: conversation ? (unreadByConversation[conversation.id] || 0) : 0,
+            unread_count: conversation
+              ? unreadByConversation[conversation.id] || 0
+              : 0,
           };
         })
         .filter((m): m is MatchWithProfile => m !== null)
@@ -510,7 +579,10 @@ export default function FeedClient({ user }: FeedClientProps) {
         );
 
       // Calculate total unread count
-      const totalUnread = matchesWithProfiles.reduce((sum, m) => sum + (m.unread_count || 0), 0);
+      const totalUnread = matchesWithProfiles.reduce(
+        (sum, m) => sum + (m.unread_count || 0),
+        0
+      );
       setTotalUnreadCount(totalUnread);
 
       setMatches(matchesWithProfiles);
@@ -592,10 +664,12 @@ export default function FeedClient({ user }: FeedClientProps) {
             m.conversation_id === conversationId ? { ...m, unread_count: 0 } : m
           )
         );
-        
+
         // Recalculate total unread
         setTotalUnreadCount((prev) => {
-          const match = matches.find((m) => m.conversation_id === conversationId);
+          const match = matches.find(
+            (m) => m.conversation_id === conversationId
+          );
           return Math.max(0, prev - (match?.unread_count || 0));
         });
       }
@@ -715,8 +789,11 @@ export default function FeedClient({ user }: FeedClientProps) {
         async (payload) => {
           console.log("New like received:", payload);
           // Someone liked us - check if it's a match
-          const newLike = payload.new as { from_user_id: string; to_user_id: string };
-          
+          const newLike = payload.new as {
+            from_user_id: string;
+            to_user_id: string;
+          };
+
           // Check if we already liked them back
           const { data: ourLike } = await supabase
             .from("user_likes")
@@ -758,7 +835,9 @@ export default function FeedClient({ user }: FeedClientProps) {
       let conversationId: string | undefined = match.conversation_id;
 
       if (!conversationId) {
-        const newConvId = await getOrCreateConversation(match.matched_with_user_id);
+        const newConvId = await getOrCreateConversation(
+          match.matched_with_user_id
+        );
         if (newConvId) {
           conversationId = newConvId;
           // Update match with conversation ID
@@ -785,7 +864,10 @@ export default function FeedClient({ user }: FeedClientProps) {
 
   // Save like to database
   const saveLike = useCallback(
-    async (toUserId: string, callDurationSeconds?: number): Promise<boolean> => {
+    async (
+      toUserId: string,
+      callDurationSeconds?: number
+    ): Promise<boolean> => {
       if (!currentUserId) {
         toast.error("Please log in to like profiles");
         return false;
@@ -805,36 +887,54 @@ export default function FeedClient({ user }: FeedClientProps) {
 
         if (existingLike) {
           // Update existing like - add to existing duration (multiple calls)
-          const newDuration = (existingLike.call_duration_seconds || 0) + durationToSave;
+          const newDuration =
+            (existingLike.call_duration_seconds || 0) + durationToSave;
           console.log(`Updating existing like ID: ${existingLike.id}`);
-          console.log(`Previous: ${existingLike.call_duration_seconds || 0}s, Adding: ${durationToSave}s, New total: ${newDuration}s`);
-          
+          console.log(
+            `Previous: ${
+              existingLike.call_duration_seconds || 0
+            }s, Adding: ${durationToSave}s, New total: ${newDuration}s`
+          );
+
           const { data: updateData, error: updateError } = await supabase
             .from("user_likes")
             .update({ call_duration_seconds: newDuration })
             .eq("id", existingLike.id)
             .select();
 
-          console.log("Update response - data:", updateData, "error:", updateError);
+          console.log(
+            "Update response - data:",
+            updateData,
+            "error:",
+            updateError
+          );
 
           if (updateError) {
             console.error("Error updating like:", updateError);
             return false;
           }
-          
+
           if (!updateData || updateData.length === 0) {
-            console.error("Update returned no data - RLS policy may be blocking update");
+            console.error(
+              "Update returned no data - RLS policy may be blocking update"
+            );
           } else {
-            console.log("Like updated successfully, new value:", updateData[0]?.call_duration_seconds);
+            console.log(
+              "Like updated successfully, new value:",
+              updateData[0]?.call_duration_seconds
+            );
           }
         } else {
           // Insert new like
           console.log("Creating new like with duration:", durationToSave);
-          const { data, error } = await supabase.from("user_likes").insert({
-            from_user_id: currentUserId,
-            to_user_id: toUserId,
-            call_duration_seconds: durationToSave,
-          }).select();
+          const { data, error } = await supabase
+            .from("user_likes")
+            .insert({
+              from_user_id: currentUserId,
+              to_user_id: toUserId,
+              call_duration_seconds: durationToSave,
+            })
+            .select();
 
           console.log("Insert response - data:", data, "error:", error);
 
@@ -870,8 +970,11 @@ export default function FeedClient({ user }: FeedClientProps) {
   );
 
   const endCall = useCallback(async () => {
-    console.log("endCall triggered, callStartTimeRef:", callStartTimeRef.current);
-    
+    console.log(
+      "endCall triggered, callStartTimeRef:",
+      callStartTimeRef.current
+    );
+
     // Calculate duration before ending session
     let duration = 0;
     if (callStartTimeRef.current) {
@@ -881,11 +984,11 @@ export default function FeedClient({ user }: FeedClientProps) {
     } else {
       console.warn("No call start time found - duration will be 0");
     }
-    
+
     // Store duration in ref (immediate, not async like state)
     lastCallDurationRef.current = duration;
     console.log("Duration stored in ref:", lastCallDurationRef.current);
-    
+
     await conversation.endSession();
     setShowDecisionModal(true);
   }, [conversation]);
@@ -929,8 +1032,14 @@ export default function FeedClient({ user }: FeedClientProps) {
       setSwipeDirection(decision === "yes" ? "right" : "left");
 
       if (decision === "yes") {
-        console.log("Liking with duration from ref:", lastCallDurationRef.current);
-        const saved = await saveLike(currentProfile.user_id, lastCallDurationRef.current);
+        console.log(
+          "Liking with duration from ref:",
+          lastCallDurationRef.current
+        );
+        const saved = await saveLike(
+          currentProfile.user_id,
+          lastCallDurationRef.current
+        );
         if (saved) {
           toast.success(`You liked ${currentProfile.display_name}! 💕`);
         }
@@ -998,41 +1107,45 @@ export default function FeedClient({ user }: FeedClientProps) {
 
   // Get profile picture path based on gender (default) or real photo (for matches)
   const getProfilePicturePath = (
-    profile: UserProfile, 
+    profile: UserProfile,
     options: { index?: number; useRealPhoto?: boolean } = {}
   ): string => {
     const { index = 0, useRealPhoto = false } = options;
-    
+
     // If useRealPhoto is true and profile has a photo, use it
     if (useRealPhoto && profile.profile_photo_url) {
       return profile.profile_photo_url;
     }
-    
+
     // Otherwise, use default picture based on gender
-    const gender = profile.gender?.toLowerCase() || 'male';
-    let folder = 'male';
+    const gender = profile.gender?.toLowerCase() || "male";
+    let folder = "male";
     let maxPics = 3;
-    
-    if (gender === 'female' || gender === 'woman' || gender === 'women') {
-      folder = 'female';
+
+    if (gender === "female" || gender === "woman" || gender === "women") {
+      folder = "female";
       maxPics = 3;
-    } else if (gender === 'non-binary' || gender === 'nonbinary' || gender === 'nb') {
-      folder = 'non-binary';
+    } else if (
+      gender === "non-binary" ||
+      gender === "nonbinary" ||
+      gender === "nb"
+    ) {
+      folder = "non-binary";
       maxPics = 1;
     }
-    
+
     // Use user_id hash for consistent picture selection, fallback to index
     let picIndex = index;
     if (profile.user_id) {
       // Simple hash of user_id for consistent picture selection
       let hash = 0;
       for (let i = 0; i < profile.user_id.length; i++) {
-        hash = ((hash << 5) - hash) + profile.user_id.charCodeAt(i);
+        hash = (hash << 5) - hash + profile.user_id.charCodeAt(i);
         hash = hash & hash; // Convert to 32-bit integer
       }
       picIndex = Math.abs(hash);
     }
-    
+
     const picNumber = (picIndex % maxPics) + 1;
     return `/profiles/${folder}/profile${picNumber}.png`;
   };
@@ -1078,14 +1191,14 @@ export default function FeedClient({ user }: FeedClientProps) {
   const isEndOfProfiles = currentIndex >= profiles.length;
 
   return (
-    <div 
+    <div
       className="h-screen relative overflow-hidden flex flex-col"
       style={{
-        backgroundImage: 'url(/background.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed'
+        backgroundImage: "url(/background.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
       }}
     >
       {/* Header */}
@@ -1104,7 +1217,11 @@ export default function FeedClient({ user }: FeedClientProps) {
                   <Sparkles className="w-5 h-5 text-foreground" />
                 </div>
                 {(matches.length > 0 || totalUnreadCount > 0) && (
-                  <div className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center border-2 border-background ${totalUnreadCount > 0 ? 'bg-destructive' : 'bg-primary'}`}>
+                  <div
+                    className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center border-2 border-background ${
+                      totalUnreadCount > 0 ? "bg-destructive" : "bg-primary"
+                    }`}
+                  >
                     <span className="text-[10px] font-bold text-primary-foreground">
                       {totalUnreadCount > 0 ? totalUnreadCount : matches.length}
                     </span>
@@ -1289,7 +1406,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                   <h2 className="text-5xl font-bold font-heading text-white mb-6 text-left">
                     Meet
                   </h2>
-                  
+
                   {/* Profile Picture - Clickable to start/stop conversation */}
                   <button
                     onClick={toggleCall}
@@ -1297,21 +1414,29 @@ export default function FeedClient({ user }: FeedClientProps) {
                   >
                     <img
                       key={`feed-${currentProfile.user_id}-${currentIndex}`}
-                      src={getProfilePicturePath(currentProfile, { index: currentIndex, useRealPhoto: false })}
+                      src={getProfilePicturePath(currentProfile, {
+                        index: currentIndex,
+                        useRealPhoto: false,
+                      })}
                       alt={currentProfile.display_name}
                       className="w-full h-full object-cover transition-transform group-hover:scale-105"
                       onError={(e) => {
-                        console.error('Failed to load image:', e.currentTarget.src);
+                        console.error(
+                          "Failed to load image:",
+                          e.currentTarget.src
+                        );
                       }}
                     />
-                    
+
                     {/* Voice Visualizer Overlay */}
                     {status === "connected" || status === "connecting" ? (
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
                         {status !== "connected" ? (
                           <div className="text-center">
                             <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                            <p className="text-white text-sm font-medium">Connecting...</p>
+                            <p className="text-white text-sm font-medium">
+                              Connecting...
+                            </p>
                           </div>
                         ) : (
                           <div className="flex flex-col items-center gap-3">
@@ -1343,7 +1468,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                         )}
                       </div>
                     ) : null}
-                    
+
                     {/* Name and Age overlay */}
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 z-20">
                       <h3 className="text-white text-2xl font-bold font-heading text-left">
@@ -1357,8 +1482,6 @@ export default function FeedClient({ user }: FeedClientProps) {
           </AnimatePresence>
         )}
       </main>
-
-
 
       {/* Decision Modal */}
       <AnimatePresence>
@@ -1385,7 +1508,10 @@ export default function FeedClient({ user }: FeedClientProps) {
                 <div className="flex items-center gap-4 bg-secondary p-4 rounded-lg">
                   <div className="w-16 h-16 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
                     <img
-                      src={getProfilePicturePath(currentProfile, { index: currentIndex, useRealPhoto: false })}
+                      src={getProfilePicturePath(currentProfile, {
+                        index: currentIndex,
+                        useRealPhoto: false,
+                      })}
                       alt={currentProfile.display_name}
                       className="w-full h-full object-cover rounded-lg"
                     />
@@ -1508,11 +1634,13 @@ export default function FeedClient({ user }: FeedClientProps) {
               <div className="h-[70vh] max-h-[500px] relative">
                 <img
                   key={`match-${selectedMatch.profile.user_id}`}
-                  src={getProfilePicturePath(selectedMatch.profile, { useRealPhoto: true })}
+                  src={getProfilePicturePath(selectedMatch.profile, {
+                    useRealPhoto: true,
+                  })}
                   alt={selectedMatch.profile.display_name}
                   className="w-full h-full object-cover object-top"
                   onError={(e) => {
-                    console.error('Failed to load image:', e.currentTarget.src);
+                    console.error("Failed to load image:", e.currentTarget.src);
                   }}
                 />
               </div>
@@ -1551,7 +1679,6 @@ export default function FeedClient({ user }: FeedClientProps) {
                     </div>
                   )}
 
-
                 {/* Talk Time Stats */}
                 {(selectedMatch.total_call_duration_seconds ?? 0) > 0 && (
                   <div className="bg-secondary/50 rounded-xl p-4">
@@ -1564,7 +1691,9 @@ export default function FeedClient({ user }: FeedClientProps) {
                           <Clock className="w-5 h-5 text-primary" />
                         </div>
                         <p className="text-lg font-bold text-foreground">
-                          {formatDuration(selectedMatch.my_call_duration_seconds || 0)}
+                          {formatDuration(
+                            selectedMatch.my_call_duration_seconds || 0
+                          )}
                         </p>
                         <p className="text-xs text-muted-foreground">You</p>
                       </div>
@@ -1573,7 +1702,9 @@ export default function FeedClient({ user }: FeedClientProps) {
                           <Clock className="w-5 h-5 text-primary" />
                         </div>
                         <p className="text-lg font-bold text-foreground">
-                          {formatDuration(selectedMatch.their_call_duration_seconds || 0)}
+                          {formatDuration(
+                            selectedMatch.their_call_duration_seconds || 0
+                          )}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {selectedMatch.profile.display_name.split(" ")[0]}
@@ -1584,7 +1715,9 @@ export default function FeedClient({ user }: FeedClientProps) {
                           <Heart className="w-5 h-5 text-primary-foreground" />
                         </div>
                         <p className="text-lg font-bold text-foreground">
-                          {formatDuration(selectedMatch.total_call_duration_seconds || 0)}
+                          {formatDuration(
+                            selectedMatch.total_call_duration_seconds || 0
+                          )}
                         </p>
                         <p className="text-xs text-muted-foreground">Total</p>
                       </div>
@@ -1681,11 +1814,13 @@ export default function FeedClient({ user }: FeedClientProps) {
               <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden">
                 <img
                   key={`chat-${selectedMatch.profile.user_id}`}
-                  src={getProfilePicturePath(selectedMatch.profile, { useRealPhoto: true })}
+                  src={getProfilePicturePath(selectedMatch.profile, {
+                    useRealPhoto: true,
+                  })}
                   alt={selectedMatch.profile.display_name}
                   className="w-full h-full object-cover rounded-full"
                   onError={(e) => {
-                    console.error('Failed to load image:', e.currentTarget.src);
+                    console.error("Failed to load image:", e.currentTarget.src);
                   }}
                 />
               </div>
