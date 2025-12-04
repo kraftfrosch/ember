@@ -11,6 +11,10 @@ import {
   Sparkles,
   User,
   LogOut,
+  MapPin,
+  Calendar,
+  MessageCircle,
+  ArrowLeft,
 } from "lucide-react";
 import { useConversation } from "@elevenlabs/react";
 import { createSupabaseClient } from "@/lib/supabase-client";
@@ -58,6 +62,9 @@ export default function FeedClient({ user }: FeedClientProps) {
   const [matches, setMatches] = useState<MatchWithProfile[]>([]);
   const [showMatchesDropdown, setShowMatchesDropdown] = useState(false);
   const [newMatchProfile, setNewMatchProfile] = useState<UserProfile | null>(
+    null
+  );
+  const [selectedMatch, setSelectedMatch] = useState<MatchWithProfile | null>(
     null
   );
   const matchesDropdownRef = useRef<HTMLDivElement>(null);
@@ -623,9 +630,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                             key={match.matched_with_user_id}
                             className="w-full px-4 py-3 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
                             onClick={() => {
-                              toast.info(
-                                `Chat with ${match.profile.display_name} coming soon!`
-                              );
+                              setSelectedMatch(match);
                               setShowMatchesDropdown(false);
                             }}
                           >
@@ -1077,6 +1082,211 @@ export default function FeedClient({ user }: FeedClientProps) {
                   Say Hi 👋
                 </button>
               </motion.div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Match Details Modal */}
+      <AnimatePresence>
+        {selectedMatch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background z-50 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 50, opacity: 0 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="min-h-screen"
+            >
+              {/* Header */}
+              <div className="sticky top-0 bg-background/80 backdrop-blur-md z-10 px-4 py-4 flex items-center gap-4 border-b border-border/40">
+                <button
+                  onClick={() => setSelectedMatch(null)}
+                  className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h1 className="text-lg font-semibold text-foreground">
+                    {selectedMatch.profile.display_name}
+                  </h1>
+                  <p className="text-xs text-muted-foreground">
+                    Matched {formatMatchTime(selectedMatch.matched_at)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Profile Photo / Avatar */}
+              <div
+                className={`h-72 ${
+                  CARD_COLORS[
+                    matches.indexOf(selectedMatch) % CARD_COLORS.length
+                  ]
+                } relative`}
+              >
+                {selectedMatch.profile.profile_photo_url ? (
+                  <img
+                    src={selectedMatch.profile.profile_photo_url}
+                    alt={selectedMatch.profile.display_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-8xl font-bold text-foreground/10">
+                      {selectedMatch.profile.display_name.charAt(0)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Profile Content */}
+              <div className="p-6 space-y-6">
+                {/* Name, Age, Location */}
+                <div>
+                  <h2 className="text-3xl font-bold text-foreground font-heading">
+                    {selectedMatch.profile.display_name},{" "}
+                    {selectedMatch.profile.age}
+                  </h2>
+                  {(selectedMatch.profile.location_city ||
+                    selectedMatch.profile.location_region) && (
+                    <p className="text-muted-foreground flex items-center gap-1 mt-1">
+                      <MapPin className="w-4 h-4" />
+                      {selectedMatch.profile.location_city}
+                      {selectedMatch.profile.location_region &&
+                        `, ${selectedMatch.profile.location_region}`}
+                    </p>
+                  )}
+                </div>
+
+                {/* Tags */}
+                {selectedMatch.profile.onboarding_tags &&
+                  selectedMatch.profile.onboarding_tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedMatch.profile.onboarding_tags.map((tag, i) => (
+                        <span
+                          key={i}
+                          className="px-3 py-1.5 bg-primary/10 text-primary rounded-full text-sm font-medium"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                {/* Bio / Summary */}
+                {(selectedMatch.profile.bio ||
+                  selectedMatch.profile.onboarding_summary) && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      About
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.bio ||
+                        selectedMatch.profile.onboarding_summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Profile Description (from AI analysis) */}
+                {selectedMatch.profile.user_profile_prompt && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Personality
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_profile_prompt}
+                    </p>
+                  </div>
+                )}
+
+                {/* What they're looking for */}
+                {selectedMatch.profile.user_preferences_prompt && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Looking For
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_preferences_prompt}
+                    </p>
+                  </div>
+                )}
+
+                {/* Important Notes */}
+                {selectedMatch.profile.user_important_notes && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Good to Know
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_important_notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* Match Info */}
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                    <Calendar className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      You matched on
+                    </p>
+                    <p className="font-medium text-foreground">
+                      {new Date(selectedMatch.matched_at).toLocaleDateString(
+                        "en-US",
+                        {
+                          weekday: "long",
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        }
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => {
+                      if (selectedMatch.profile.cloned_agent_id) {
+                        setSelectedMatch(null);
+                        // Find this profile in the main list and start a call
+                        const profileIndex = profiles.findIndex(
+                          (p) => p.user_id === selectedMatch.profile.user_id
+                        );
+                        if (profileIndex !== -1) {
+                          setCurrentIndex(profileIndex);
+                          setTimeout(() => startCall(), 100);
+                        } else {
+                          toast.info("Talk to their agent from the feed!");
+                        }
+                      } else {
+                        toast.error("Agent not available");
+                      }
+                    }}
+                    className="flex-1 py-4 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Mic className="w-5 h-5" />
+                    Talk to Agent
+                  </button>
+                  <button
+                    onClick={() => {
+                      toast.info("Chat coming soon!");
+                    }}
+                    className="flex-1 py-4 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                    Message
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </motion.div>
         )}
