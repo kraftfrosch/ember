@@ -17,6 +17,8 @@ import {
   Clock,
   Send,
   Settings,
+  Play,
+  Loader2,
 } from "lucide-react";
 import { useConversation } from "@elevenlabs/react";
 import { createSupabaseClient } from "@/lib/supabase-client";
@@ -74,10 +76,13 @@ export default function FeedClient({ user }: FeedClientProps) {
   const [newMessage, setNewMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+  const [isMusicLoading, setIsMusicLoading] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const callStartTimeRef = useRef<number | null>(null);
   const lastCallDurationRef = useRef<number>(0);
   const matchesDropdownRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const supabase = createSupabaseClient();
   const currentUserId = user?.id;
@@ -93,6 +98,30 @@ export default function FeedClient({ user }: FeedClientProps) {
       document.body.style.height = "";
     };
   }, []);
+
+  const clearCurrentMusic = useCallback(() => {
+    if (musicAudioRef.current) {
+      try {
+        const currentSrc = musicAudioRef.current.src;
+        musicAudioRef.current.pause();
+        musicAudioRef.current.src = "";
+        if (currentSrc?.startsWith("blob:")) {
+          URL.revokeObjectURL(currentSrc);
+        }
+      } catch (error) {
+        console.warn("Failed to clean up music audio", error);
+      } finally {
+        musicAudioRef.current = null;
+      }
+    }
+    setIsMusicPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearCurrentMusic();
+    };
+  }, [clearCurrentMusic]);
 
   // ElevenLabs conversation hook
   const conversation = useConversation({
@@ -127,6 +156,82 @@ export default function FeedClient({ user }: FeedClientProps) {
       toast.error(error.message || "Error signing out");
     }
   };
+
+  const handlePlayPersonalityMusic = useCallback(async () => {
+    if (isMusicLoading) return;
+
+    try {
+      setIsMusicLoading(true);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        toast.error("Please sign in again to play music.");
+        return;
+      }
+
+      clearCurrentMusic();
+
+      const response = await fetch("/api/music/stream", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        let message = "Failed to generate music. Please try again.";
+        try {
+          const errorBody = await response.json();
+          if (errorBody?.error) {
+            message = errorBody.error;
+          }
+        } catch {
+          // Ignore JSON parse errors
+        }
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      musicAudioRef.current = audio;
+
+      audio.onended = () => {
+        setIsMusicPlaying(false);
+        if (audio.src?.startsWith("blob:")) {
+          URL.revokeObjectURL(audio.src);
+        }
+        if (musicAudioRef.current === audio) {
+          musicAudioRef.current = null;
+        }
+      };
+
+      audio.onerror = () => {
+        if (audio.src?.startsWith("blob:")) {
+          URL.revokeObjectURL(audio.src);
+        }
+        if (musicAudioRef.current === audio) {
+          musicAudioRef.current = null;
+        }
+        setIsMusicPlaying(false);
+        toast.error("Playback failed. Please try again.");
+      };
+
+      await audio.play();
+      setIsMusicPlaying(true);
+    } catch (error) {
+      console.error("Music playback error:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to start the music stream.";
+      toast.error(message);
+    } finally {
+      setIsMusicLoading(false);
+    }
+  }, [supabase, clearCurrentMusic, isMusicLoading]);
 
   // Close matches dropdown when clicking outside
   useEffect(() => {
@@ -1381,6 +1486,31 @@ export default function FeedClient({ user }: FeedClientProps) {
             >
               Start Over
             </button>
+            <div className="mt-6 p-4 rounded-lg border border-dashed border-primary/30 bg-secondary/40 flex items-center justify-between gap-4 text-left">
+              <div className="text-left">
+                <p className="text-sm font-semibold text-foreground">
+                  Listen to some music generated based on your personality
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePlayPersonalityMusic}
+                disabled={isMusicLoading}
+                className="w-12 h-12 rounded-full border border-border text-primary flex items-center justify-center transition-all hover:bg-primary/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                aria-label="Play personality-based music"
+              >
+                {isMusicLoading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Play className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+            {isMusicPlaying && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Now playing your 30 second soundtrack...
+              </p>
+            )}
           </div>
         ) : (
           <AnimatePresence mode="wait">
