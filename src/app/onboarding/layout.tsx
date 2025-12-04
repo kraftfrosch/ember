@@ -7,17 +7,22 @@ export default function OnboardingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div 
+      className="h-screen text-slate-900 font-sans overflow-hidden flex items-center justify-center"
+      style={{
+        backgroundImage: 'url(/background.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    >
       <OnboardingProvider>
-        <div className="max-w-md mx-auto min-h-screen flex flex-col relative overflow-hidden bg-white shadow-2xl sm:rounded-3xl sm:my-8 sm:min-h-[800px]">
-          {/* Decorative background blobs */}
-          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[30%] bg-purple-200 rounded-full blur-3xl opacity-40 animate-pulse" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[30%] bg-pink-200 rounded-full blur-3xl opacity-40 animate-pulse" />
+        <div className="max-w-md w-full h-full flex flex-col relative overflow-hidden bg-white/95 backdrop-blur-sm shadow-2xl sm:rounded-3xl sm:h-[90vh] sm:max-h-[800px]">
 
-          <div className="relative z-10">
+          <div className="relative z-10 flex-shrink-0">
             <StepIndicator />
           </div>
-          <main className="flex-1 flex flex-col relative z-10">{children}</main>
+          <main className="flex-1 flex flex-col relative z-10 overflow-hidden">{children}</main>
         </div>
       </OnboardingProvider>
     </div>

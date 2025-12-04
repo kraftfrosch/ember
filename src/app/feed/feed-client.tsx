@@ -6,7 +6,6 @@ import {
   Heart,
   X,
   Mic,
-  PhoneOff,
   ChevronDown,
   Sparkles,
   User,
@@ -31,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Logo } from "@/components/logo";
 
 const CARD_COLORS = [
   "bg-orange-50",
@@ -53,7 +53,6 @@ export default function FeedClient({ user }: FeedClientProps) {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isCallModalOpen, setIsCallModalOpen] = useState(false);
   const [showDecisionModal, setShowDecisionModal] = useState(false);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [swipeDirection, setSwipeDirection] = useState<"left" | "right" | null>(
@@ -83,6 +82,17 @@ export default function FeedClient({ user }: FeedClientProps) {
   const currentUserId = user?.id;
 
   const currentProfile = profiles[currentIndex] || null;
+
+
+  // Prevent body scrolling on mobile
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    document.body.style.height = '100vh';
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.height = '';
+    };
+  }, []);
 
   // ElevenLabs conversation hook
   const conversation = useConversation({
@@ -746,34 +756,6 @@ export default function FeedClient({ user }: FeedClientProps) {
     [supabase, currentUserId, profiles, fetchMatches]
   );
 
-  // Start conversation with agent
-  const startCall = useCallback(async () => {
-    if (!currentProfile?.cloned_agent_id) {
-      toast.error("This user's agent is not available");
-      return;
-    }
-
-    setIsCallModalOpen(true);
-    
-    // Set call start time immediately as a backup
-    // (onConnect should also set this, but just in case)
-    callStartTimeRef.current = Date.now();
-    console.log("startCall - timer started:", callStartTimeRef.current);
-
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      await conversation.startSession({
-        agentId: currentProfile.cloned_agent_id,
-        connectionType: "webrtc",
-      });
-    } catch (error) {
-      console.error("Failed to start conversation:", error);
-      toast.error("Could not access microphone or connect to agent");
-      setIsCallModalOpen(false);
-      callStartTimeRef.current = null; // Reset on error
-    }
-  }, [conversation, currentProfile]);
-
   const endCall = useCallback(async () => {
     console.log("endCall triggered, callStartTimeRef:", callStartTimeRef.current);
     
@@ -792,9 +774,39 @@ export default function FeedClient({ user }: FeedClientProps) {
     console.log("Duration stored in ref:", lastCallDurationRef.current);
     
     await conversation.endSession();
-    setIsCallModalOpen(false);
     setShowDecisionModal(true);
   }, [conversation]);
+
+  // Start or end conversation with agent
+  const toggleCall = useCallback(async () => {
+    // If already connected, end the call
+    if (status === "connected") {
+      await endCall();
+      return;
+    }
+
+    // Otherwise, start the call
+    if (!currentProfile?.cloned_agent_id) {
+      toast.error("This user's agent is not available");
+      return;
+    }
+
+    // Set call start time immediately as a backup
+    // (onConnect should also set this, but just in case)
+    callStartTimeRef.current = Date.now();
+    console.log("startCall - timer started:", callStartTimeRef.current);
+
+    try {
+      await conversation.startSession({
+        agentId: currentProfile.cloned_agent_id,
+        connectionType: "webrtc",
+      });
+    } catch (error: any) {
+      console.error("Failed to start conversation:", error);
+      toast.error("Could not access microphone or connect to agent");
+      callStartTimeRef.current = null; // Reset on error
+    }
+  }, [conversation, currentProfile, status, endCall]);
 
   const handleDecision = useCallback(
     async (decision: Decision) => {
@@ -877,6 +889,36 @@ export default function FeedClient({ user }: FeedClientProps) {
     return `"Looking forward to connecting..."`;
   };
 
+  // Get profile picture path based on gender
+  const getProfilePicturePath = (profile: UserProfile, index: number = 0): string => {
+    const gender = profile.gender?.toLowerCase() || 'male';
+    let folder = 'male';
+    let maxPics = 3;
+    
+    if (gender === 'female' || gender === 'woman' || gender === 'women') {
+      folder = 'female';
+      maxPics = 3;
+    } else if (gender === 'non-binary' || gender === 'nonbinary' || gender === 'nb') {
+      folder = 'non-binary';
+      maxPics = 1;
+    }
+    
+    // Use user_id hash for consistent picture selection, fallback to index
+    let picIndex = index;
+    if (profile.user_id) {
+      // Simple hash of user_id for consistent picture selection
+      let hash = 0;
+      for (let i = 0; i < profile.user_id.length; i++) {
+        hash = ((hash << 5) - hash) + profile.user_id.charCodeAt(i);
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      picIndex = Math.abs(hash);
+    }
+    
+    const picNumber = (picIndex % maxPics) + 1;
+    return `/profiles/${folder}/profile${picNumber}.png`;
+  };
+
   const formatMatchTime = (dateStr: string): string => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -918,21 +960,21 @@ export default function FeedClient({ user }: FeedClientProps) {
   const isEndOfProfiles = currentIndex >= profiles.length;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div 
+      className="h-screen relative overflow-hidden flex flex-col"
+      style={{
+        backgroundImage: 'url(/background.png)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed'
+      }}
+    >
       {/* Header */}
-      <header className="bg-background/80 backdrop-blur-md px-6 py-4 sticky top-0 z-50 flex justify-between items-center border-b border-border/40">
-        <h1 className="text-3xl font-bold text-primary font-heading">Ember</h1>
+      <header className="px-6 py-2 z-50 flex justify-between items-center flex-shrink-0">
+        <Logo width={160} height={48} />
 
         <div className="flex items-center gap-3">
-          {likesCount > 0 && (
-            <div className="flex items-center gap-1 bg-primary/10 px-3 py-1 rounded-md">
-              <Heart className="w-4 h-4 text-primary fill-primary" />
-              <span className="text-sm font-medium text-primary">
-                {likesCount}
-              </span>
-            </div>
-          )}
-
           {/* Matches Dropdown */}
           <div className="relative" ref={matchesDropdownRef}>
             <button
@@ -1069,24 +1111,7 @@ export default function FeedClient({ user }: FeedClientProps) {
       </header>
 
       {/* Main Content */}
-      <main className="p-4 pb-8 space-y-4 max-w-md mx-auto relative z-10">
-        {/* Progress indicator */}
-        {profiles.length > 0 && !isEndOfProfiles && (
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-sm text-muted-foreground">
-              {currentIndex + 1} of {profiles.length}
-            </span>
-            <div className="flex-1 mx-4 h-1 bg-secondary rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{
-                  width: `${((currentIndex + 1) / profiles.length) * 100}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
-
+      <main className="px-4 pb-2 pt-1 max-w-lg mx-auto relative z-10 flex flex-col justify-center flex-1 overflow-hidden">
         {profiles.length === 0 ? (
           <div className="bg-card rounded-xl p-8 text-center shadow-sm border border-border/50 mt-20">
             <Mic className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
@@ -1130,87 +1155,77 @@ export default function FeedClient({ user }: FeedClientProps) {
                     : 0,
               }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="bg-card rounded-xl overflow-hidden shadow-sm border border-border/50"
+              transition={{ duration: swipeDirection ? 0.3 : 0.2 }}
+              className="w-full flex flex-col"
             >
               {currentProfile && (
                 <>
-                  <div
-                    className={`h-72 ${
-                      CARD_COLORS[currentIndex % CARD_COLORS.length]
-                    } relative group transition-colors`}
+                  {/* Meet text */}
+                  <h2 className="text-5xl font-bold font-heading text-white mb-6 text-left">
+                    Meet
+                  </h2>
+                  
+                  {/* Profile Picture - Clickable to start/stop conversation */}
+                  <button
+                    onClick={toggleCall}
+                    className="w-full aspect-square relative overflow-hidden group cursor-pointer rounded-xl"
                   >
-                    {currentProfile.profile_photo_url ? (
-                      <img
-                        src={currentProfile.profile_photo_url}
-                        alt={currentProfile.display_name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="absolute w-32 h-32 bg-primary/20 rounded-full blur-[50px] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-                        <Mic className="w-16 h-16 text-foreground/10 group-hover:scale-110 transition-transform duration-500 relative z-10" />
-                      </div>
-                    )}
-                    <div className="absolute bottom-4 left-4 flex gap-2">
-                      <div className="bg-white/60 backdrop-blur-md px-4 py-1.5 rounded-md text-xs font-medium shadow-sm border border-white/20">
-                        {getProfileTag(currentProfile)}
-                      </div>
-                      {currentProfile.onboarding_tags
-                        ?.slice(1, 3)
-                        .map((tag, i) => (
-                          <div
-                            key={i}
-                            className="bg-white/60 backdrop-blur-md px-4 py-1.5 rounded-md text-xs font-medium shadow-sm border border-white/20"
-                          >
-                            {tag}
+                    <img
+                      key={`feed-${currentProfile.user_id}-${currentIndex}`}
+                      src={getProfilePicturePath(currentProfile, currentIndex)}
+                      alt={currentProfile.display_name}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      onError={(e) => {
+                        console.error('Failed to load image:', e.currentTarget.src);
+                      }}
+                    />
+                    
+                    {/* Voice Visualizer Overlay */}
+                    {status === "connected" || status === "connecting" ? (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+                        {status !== "connected" ? (
+                          <div className="text-center">
+                            <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                            <p className="text-white text-sm font-medium">Connecting...</p>
                           </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  <div className="p-6 pt-4">
-                    <div className="mb-4">
-                      <h3 className="text-3xl font-bold text-foreground font-heading">
+                        ) : (
+                          <div className="flex flex-col items-center gap-3">
+                            {/* Voice Visualizer Bars */}
+                            <div className="flex items-end gap-1.5 h-12">
+                              {[1, 2, 3, 4, 5].map((i) => (
+                                <motion.div
+                                  key={i}
+                                  animate={{
+                                    height: isSpeaking
+                                      ? [8, Math.random() * 32 + 16, 8]
+                                      : 8,
+                                  }}
+                                  transition={{
+                                    repeat: Infinity,
+                                    duration: 0.4,
+                                    delay: i * 0.05,
+                                    ease: "easeInOut",
+                                  }}
+                                  className="w-2 bg-white rounded-full"
+                                  style={{ minHeight: "8px" }}
+                                />
+                              ))}
+                            </div>
+                            <p className="text-white text-xs font-medium">
+                              {isSpeaking ? "Speaking..." : "Listening..."}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    
+                    {/* Name and Age overlay */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 z-20">
+                      <h3 className="text-white text-2xl font-bold font-heading text-left">
                         {currentProfile.display_name}, {currentProfile.age}
                       </h3>
-                      {currentProfile.location_city && (
-                        <p className="text-muted-foreground text-sm mt-1">
-                          {currentProfile.location_city}
-                          {currentProfile.location_region &&
-                            `, ${currentProfile.location_region}`}
-                        </p>
-                      )}
-                      <p className="text-muted-foreground text-sm mt-2 leading-relaxed">
-                        {getBioExcerpt(currentProfile)}
-                      </p>
                     </div>
-
-                    {/* Action buttons */}
-                    <div className="mt-8 flex gap-3">
-                      <button
-                        onClick={handleSkip}
-                        className="w-16 h-16 bg-secondary hover:bg-secondary/80 text-muted-foreground rounded-xl flex items-center justify-center transition-all hover:scale-105"
-                      >
-                        <X className="w-7 h-7" />
-                      </button>
-
-                      <button
-                        onClick={startCall}
-                        className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground py-4 rounded-md font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2 shadow-sm"
-                      >
-                        <Mic className="w-5 h-5" />
-                        Talk
-                      </button>
-
-                      <button
-                        onClick={handleLike}
-                        className="w-16 h-16 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl flex items-center justify-center transition-all hover:scale-105"
-                      >
-                        <Heart className="w-7 h-7" />
-                      </button>
-                    </div>
-                  </div>
+                  </button>
                 </>
               )}
             </motion.div>
@@ -1219,100 +1234,6 @@ export default function FeedClient({ user }: FeedClientProps) {
       </main>
 
 
-      {/* Voice Call Modal */}
-      <AnimatePresence>
-        {isCallModalOpen && currentProfile && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-card rounded-xl w-full max-w-sm p-8 relative border border-border"
-            >
-              <div className="text-center space-y-6">
-                <div>
-                  <h2 className="text-xl font-bold text-foreground font-heading">
-                    {currentProfile.display_name}
-                  </h2>
-                  <p className="text-muted-foreground text-sm mt-1">
-                    {status === "connected" ? "Connected" : "Connecting..."}
-                  </p>
-                </div>
-
-                <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
-                  {status === "connected" && (
-                    <>
-                      <motion.div
-                        animate={{
-                          scale: isSpeaking ? [1, 1.2, 1] : 1,
-                          opacity: isSpeaking ? 0.5 : 0.2,
-                        }}
-                        transition={{
-                          repeat: Infinity,
-                          duration: 2,
-                          ease: "easeInOut",
-                        }}
-                        className="absolute inset-0 bg-primary rounded-full blur-xl"
-                      />
-                      <motion.div
-                        animate={{ scale: isSpeaking ? [1, 1.1, 1] : 1 }}
-                        transition={{
-                          repeat: Infinity,
-                          duration: 1,
-                          ease: "easeInOut",
-                        }}
-                        className="absolute inset-4 bg-primary/30 rounded-full"
-                      />
-                    </>
-                  )}
-
-                  <div className="relative z-10 w-28 h-28 bg-card rounded-full shadow-xl flex items-center justify-center border-4 border-border">
-                    {status === "connected" ? (
-                      <div className="flex gap-1 items-center">
-                        {[1, 2, 3, 4].map((i) => (
-                          <motion.div
-                            key={i}
-                            animate={{ height: isSpeaking ? [15, 35, 15] : 8 }}
-                            transition={{
-                              repeat: Infinity,
-                              duration: 0.4,
-                              delay: i * 0.1,
-                            }}
-                            className="w-2 bg-foreground rounded-full"
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="w-6 h-6 border-3 border-primary border-t-transparent rounded-full animate-spin" />
-                    )}
-                  </div>
-                </div>
-
-                <p className="text-muted-foreground text-sm">
-                  {isSpeaking
-                    ? "Speaking..."
-                    : status === "connected"
-                    ? "Your turn to speak"
-                    : "Setting up connection..."}
-                </p>
-
-                <button
-                  onClick={endCall}
-                  className="w-full py-4 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-md font-medium flex items-center justify-center gap-2 transition-colors"
-                >
-                  <PhoneOff className="w-5 h-5" />
-                  End Call
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Decision Modal */}
       <AnimatePresence>
@@ -1492,26 +1413,16 @@ export default function FeedClient({ user }: FeedClientProps) {
               </div>
 
               {/* Profile Photo / Avatar */}
-              <div
-                className={`h-72 ${
-                  CARD_COLORS[
-                    matches.indexOf(selectedMatch) % CARD_COLORS.length
-                  ]
-                } relative`}
-              >
-                {selectedMatch.profile.profile_photo_url ? (
-                  <img
-                    src={selectedMatch.profile.profile_photo_url}
-                    alt={selectedMatch.profile.display_name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-8xl font-bold text-foreground/10">
-                      {selectedMatch.profile.display_name.charAt(0)}
-                    </span>
-                  </div>
-                )}
+              <div className="h-72 relative">
+                <img
+                  key={`match-${selectedMatch.profile.user_id}`}
+                  src={getProfilePicturePath(selectedMatch.profile)}
+                  alt={selectedMatch.profile.display_name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    console.error('Failed to load image:', e.currentTarget.src);
+                  }}
+                />
               </div>
 
               {/* Profile Content */}
@@ -1548,55 +1459,6 @@ export default function FeedClient({ user }: FeedClientProps) {
                     </div>
                   )}
 
-                {/* Bio / Summary */}
-                {(selectedMatch.profile.bio ||
-                  selectedMatch.profile.onboarding_summary) && (
-                  <div className="bg-secondary/50 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                      About
-                    </h3>
-                    <p className="text-foreground leading-relaxed">
-                      {selectedMatch.profile.bio ||
-                        selectedMatch.profile.onboarding_summary}
-                    </p>
-                  </div>
-                )}
-
-                {/* Profile Description (from AI analysis) */}
-                {selectedMatch.profile.user_profile_prompt && (
-                  <div className="bg-secondary/50 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                      Personality
-                    </h3>
-                    <p className="text-foreground leading-relaxed">
-                      {selectedMatch.profile.user_profile_prompt}
-                    </p>
-                  </div>
-                )}
-
-                {/* What they're looking for */}
-                {selectedMatch.profile.user_preferences_prompt && (
-                  <div className="bg-secondary/50 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                      Looking For
-                    </h3>
-                    <p className="text-foreground leading-relaxed">
-                      {selectedMatch.profile.user_preferences_prompt}
-                    </p>
-                  </div>
-                )}
-
-                {/* Important Notes */}
-                {selectedMatch.profile.user_important_notes && (
-                  <div className="bg-secondary/50 rounded-xl p-4">
-                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                      Good to Know
-                    </h3>
-                    <p className="text-foreground leading-relaxed">
-                      {selectedMatch.profile.user_important_notes}
-                    </p>
-                  </div>
-                )}
 
                 {/* Talk Time Stats */}
                 {(selectedMatch.total_call_duration_seconds ?? 0) > 0 && (
@@ -1673,7 +1535,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                         );
                         if (profileIndex !== -1) {
                           setCurrentIndex(profileIndex);
-                          setTimeout(() => startCall(), 100);
+                          setTimeout(() => toggleCall(), 100);
                         } else {
                           toast.info("Talk to their agent from the feed!");
                         }
@@ -1724,22 +1586,16 @@ export default function FeedClient({ user }: FeedClientProps) {
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  CARD_COLORS[matches.indexOf(selectedMatch) % CARD_COLORS.length]
-                }`}
-              >
-                {selectedMatch.profile.profile_photo_url ? (
-                  <img
-                    src={selectedMatch.profile.profile_photo_url}
-                    alt={selectedMatch.profile.display_name}
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                ) : (
-                  <span className="text-sm font-semibold text-foreground/60">
-                    {selectedMatch.profile.display_name.charAt(0)}
-                  </span>
-                )}
+              <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden">
+                <img
+                  key={`chat-${selectedMatch.profile.user_id}`}
+                  src={getProfilePicturePath(selectedMatch.profile)}
+                  alt={selectedMatch.profile.display_name}
+                  className="w-full h-full object-cover rounded-full"
+                  onError={(e) => {
+                    console.error('Failed to load image:', e.currentTarget.src);
+                  }}
+                />
               </div>
               <div className="flex-1">
                 <h1 className="font-semibold text-foreground">
