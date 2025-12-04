@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   Clock,
   Send,
+  Settings,
 } from "lucide-react";
 import { useConversation } from "@elevenlabs/react";
 import { createSupabaseClient } from "@/lib/supabase-client";
@@ -967,8 +968,19 @@ export default function FeedClient({ user }: FeedClientProps) {
     return `"Looking forward to connecting..."`;
   };
 
-  // Get profile picture path based on gender
-  const getProfilePicturePath = (profile: UserProfile, index: number = 0): string => {
+  // Get profile picture path based on gender (default) or real photo (for matches)
+  const getProfilePicturePath = (
+    profile: UserProfile, 
+    options: { index?: number; useRealPhoto?: boolean } = {}
+  ): string => {
+    const { index = 0, useRealPhoto = false } = options;
+    
+    // If useRealPhoto is true and profile has a photo, use it
+    if (useRealPhoto && profile.profile_photo_url) {
+      return profile.profile_photo_url;
+    }
+    
+    // Otherwise, use default picture based on gender
     const gender = profile.gender?.toLowerCase() || 'male';
     let folder = 'male';
     let maxPics = 3;
@@ -1177,6 +1189,13 @@ export default function FeedClient({ user }: FeedClientProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                onClick={() => router.push("/profile/edit")}
+                className="cursor-pointer rounded-md"
+              >
+                <Settings className="w-4 h-4 mr-2" />
+                Edit Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 onClick={handleSignOut}
                 className="text-destructive cursor-pointer focus:text-destructive focus:bg-destructive/10 rounded-md"
               >
@@ -1250,7 +1269,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                   >
                     <img
                       key={`feed-${currentProfile.user_id}-${currentIndex}`}
-                      src={getProfilePicturePath(currentProfile, currentIndex)}
+                      src={getProfilePicturePath(currentProfile, { index: currentIndex, useRealPhoto: false })}
                       alt={currentProfile.display_name}
                       className="w-full h-full object-cover transition-transform group-hover:scale-105"
                       onError={(e) => {
@@ -1339,20 +1358,12 @@ export default function FeedClient({ user }: FeedClientProps) {
                 </div>
 
                 <div className="flex items-center gap-4 bg-secondary p-4 rounded-lg">
-                  <div
-                    className={`w-16 h-16 ${
-                      CARD_COLORS[currentIndex % CARD_COLORS.length]
-                    } rounded-lg flex items-center justify-center flex-shrink-0`}
-                  >
-                    {currentProfile.profile_photo_url ? (
-                      <img
-                        src={currentProfile.profile_photo_url}
-                        alt={currentProfile.display_name}
-                        className="w-full h-full object-cover rounded-lg"
-                      />
-                    ) : (
-                      <Mic className="w-6 h-6 text-foreground/20" />
-                    )}
+                  <div className="w-16 h-16 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <img
+                      src={getProfilePicturePath(currentProfile, { index: currentIndex, useRealPhoto: false })}
+                      alt={currentProfile.display_name}
+                      className="w-full h-full object-cover rounded-lg"
+                    />
                   </div>
                   <div className="text-left">
                     <h3 className="font-semibold text-foreground">
@@ -1491,12 +1502,12 @@ export default function FeedClient({ user }: FeedClientProps) {
               </div>
 
               {/* Profile Photo / Avatar */}
-              <div className="h-72 relative">
+              <div className="h-[70vh] max-h-[500px] relative">
                 <img
                   key={`match-${selectedMatch.profile.user_id}`}
-                  src={getProfilePicturePath(selectedMatch.profile)}
+                  src={getProfilePicturePath(selectedMatch.profile, { useRealPhoto: true })}
                   alt={selectedMatch.profile.display_name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover object-top"
                   onError={(e) => {
                     console.error('Failed to load image:', e.currentTarget.src);
                   }}
@@ -1667,7 +1678,7 @@ export default function FeedClient({ user }: FeedClientProps) {
               <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden">
                 <img
                   key={`chat-${selectedMatch.profile.user_id}`}
-                  src={getProfilePicturePath(selectedMatch.profile)}
+                  src={getProfilePicturePath(selectedMatch.profile, { useRealPhoto: true })}
                   alt={selectedMatch.profile.display_name}
                   className="w-full h-full object-cover rounded-full"
                   onError={(e) => {
