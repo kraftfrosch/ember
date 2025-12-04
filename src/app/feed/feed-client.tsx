@@ -1408,12 +1408,12 @@ export default function FeedClient({ user }: FeedClientProps) {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.8, opacity: 0 }}
               transition={{ type: "spring", duration: 0.5 }}
-              className="bg-card rounded-xl w-full max-w-sm overflow-hidden border border-border flex flex-col"
+              className="bg-card rounded-xl w-[90vw] max-w-[90vw] sm:max-w-sm overflow-hidden border border-border flex flex-col"
             >
               {/* Spark Image */}
               <div className="w-full aspect-square relative">
                 <img
-                  src="/spark.png"
+                  src="/spark2.jpg"
                   alt="Match celebration"
                   className="w-full h-full object-cover"
                 />
@@ -1432,9 +1432,9 @@ export default function FeedClient({ user }: FeedClientProps) {
                     }
                     setNewMatchProfile(null);
                   }}
-                  className="w-full py-4 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-semibold transition-colors"
+                  className="w-full py-4 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md font-semibold text-lg transition-colors"
                 >
-                  Say hi
+                  Say Hi!
                 </button>
               </div>
             </motion.div>
