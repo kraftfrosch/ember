@@ -45,7 +45,8 @@ export interface UserProfile {
 
 export interface OnboardingPreferences {
   // What they're looking for in a partner
-  partner_gender?: string | string[];
+  looking_for?: string | string[];  // Primary field from onboarding
+  partner_gender?: string | string[];  // Legacy/alternative field
   partner_age_range?: {
     min?: number;
     max?: number;
@@ -86,6 +87,7 @@ export interface UserLike {
   id: string;
   from_user_id: string;
   to_user_id: string;
+  call_duration_seconds?: number;
   created_at: string;
 }
 
@@ -94,4 +96,26 @@ export interface MatchWithProfile {
   matched_with_user_id: string;
   matched_at: string;
   profile: UserProfile;
+  my_call_duration_seconds?: number;
+  their_call_duration_seconds?: number;
+  total_call_duration_seconds?: number;
+  conversation_id?: string;
+  unread_count?: number;
+}
+
+export interface Conversation {
+  id: string;
+  user1_id: string;
+  user2_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  read_at: string | null;
+  created_at: string;
 }

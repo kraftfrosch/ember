@@ -10,12 +10,18 @@ import {
   Sparkles,
   User,
   LogOut,
+  MapPin,
+  Calendar,
+  MessageCircle,
+  ArrowLeft,
+  Clock,
+  Send,
 } from "lucide-react";
 import { useConversation } from "@elevenlabs/react";
 import { createSupabaseClient } from "@/lib/supabase-client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { UserProfile, MatchWithProfile } from "@/types/profile";
+import type { UserProfile, MatchWithProfile, Message } from "@/types/profile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,7 +65,18 @@ export default function FeedClient({ user }: FeedClientProps) {
   const [newMatchProfile, setNewMatchProfile] = useState<UserProfile | null>(
     null
   );
+  const [selectedMatch, setSelectedMatch] = useState<MatchWithProfile | null>(
+    null
+  );
+  const [showChat, setShowChat] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+  const callStartTimeRef = useRef<number | null>(null);
+  const lastCallDurationRef = useRef<number>(0);
   const matchesDropdownRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const supabase = createSupabaseClient();
   const currentUserId = user?.id;
@@ -80,11 +97,14 @@ export default function FeedClient({ user }: FeedClientProps) {
   // ElevenLabs conversation hook
   const conversation = useConversation({
     onConnect: () => {
-      console.log("Connected to agent");
+      console.log("Connected to agent - starting timer");
+      callStartTimeRef.current = Date.now();
+      console.log("Call start time set:", callStartTimeRef.current);
       toast.success(`Connected to ${currentProfile?.display_name}'s agent`);
     },
     onDisconnect: () => {
-      console.log("Disconnected from agent");
+      console.log("Disconnected from agent, callStartTimeRef:", callStartTimeRef.current);
+      // Duration is now calculated in endCall, so we just log here
     },
     onError: (error) => {
       console.error("Conversation error:", error);
@@ -146,11 +166,12 @@ export default function FeedClient({ user }: FeedClientProps) {
   // Helper: Normalize gender terms to a common format
   const normalizeGender = (value: string): string => {
     const v = value.toLowerCase().trim();
-    if (["woman", "women", "female", "f", "girl"].includes(v)) return "female";
-    if (["man", "men", "male", "m", "boy", "guy"].includes(v)) return "male";
-    if (["non-binary", "nonbinary", "nb", "enby", "non binary"].includes(v))
+    if (["woman", "women", "female", "f", "girl", "girls", "lady", "ladies"].includes(v)) return "female";
+    if (["man", "men", "male", "m", "boy", "guy", "guys", "gentleman", "gentlemen"].includes(v)) return "male";
+    if (["non-binary", "nonbinary", "nb", "enby", "non binary", "other"].includes(v))
       return "non-binary";
-    if (["any", "everyone", "all", "both"].includes(v)) return "any";
+    if (["any", "everyone", "all", "both", "anyone", "everybody", "open", "no preference"].includes(v)) return "any";
+    console.log(`[Matching] Unknown gender/preference value: "${value}" (normalized: "${v}")`);
     return v;
   };
 
@@ -183,13 +204,17 @@ export default function FeedClient({ user }: FeedClientProps) {
     const myPrefs = myProfile.onboarding_preferences;
     const theirPrefs = theirProfile.onboarding_preferences;
 
+    // Check both possible field names: looking_for (from onboarding) or partner_gender
+    const myLookingFor = myPrefs?.looking_for || myPrefs?.partner_gender;
+    const theirLookingFor = theirPrefs?.looking_for || theirPrefs?.partner_gender;
+
     const iWantThem = genderMatchesPreference(
       theirProfile.gender,
-      myPrefs?.partner_gender
+      myLookingFor as string | string[] | undefined
     );
     const theyWantMe = genderMatchesPreference(
       myProfile.gender,
-      theirPrefs?.partner_gender
+      theirLookingFor as string | string[] | undefined
     );
 
     let ageCompatible = true;
@@ -208,10 +233,14 @@ export default function FeedClient({ user }: FeedClientProps) {
 
     console.log(`Checking ${theirProfile.display_name}:`, {
       theirGender: theirProfile.gender,
-      myLookingFor: myPrefs?.partner_gender,
+      theirGenderNormalized: normalizeGender(theirProfile.gender || ""),
+      myLookingFor,
+      myLookingForNormalized: myLookingFor ? normalizeGender(String(myLookingFor)) : null,
       iWantThem,
       myGender: myProfile.gender,
-      theirLookingFor: theirPrefs?.partner_gender,
+      myGenderNormalized: normalizeGender(myProfile.gender || ""),
+      theirLookingFor,
+      theirLookingForNormalized: theirLookingFor ? normalizeGender(String(theirLookingFor)) : null,
       theyWantMe,
       ageCompatible,
       result: isCompatible ? "✅ SHOW" : "❌ HIDE",
@@ -230,9 +259,14 @@ export default function FeedClient({ user }: FeedClientProps) {
         return;
       }
 
-      console.log("Fetching profiles with preferences:", {
+      const myPrefs = currentUserProfile.onboarding_preferences;
+      const myLookingFor = myPrefs?.looking_for || myPrefs?.partner_gender;
+      console.log("=== CURRENT USER INFO ===", {
         myGender: currentUserProfile.gender,
-        myLookingFor: currentUserProfile.onboarding_preferences?.partner_gender,
+        myGenderNormalized: normalizeGender(currentUserProfile.gender || ""),
+        myLookingFor: myLookingFor,
+        myLookingForNormalized: myLookingFor ? normalizeGender(String(myLookingFor)) : null,
+        fullPrefs: myPrefs,
       });
 
       try {
@@ -285,13 +319,66 @@ export default function FeedClient({ user }: FeedClientProps) {
     if (!currentUserId) return;
 
     try {
+      // Get my likes with call duration
       const { data: myLikes, error: likesError } = await supabase
         .from("user_likes")
-        .select("to_user_id")
+        .select("to_user_id, call_duration_seconds")
         .eq("from_user_id", currentUserId);
 
       if (likesError) {
-        console.error("Error fetching likes:", likesError);
+        // Fallback: try without call_duration_seconds column (if it doesn't exist yet)
+        console.warn("Fetching likes with duration failed, trying without:", likesError);
+        const { data: fallbackLikes, error: fallbackError } = await supabase
+          .from("user_likes")
+          .select("to_user_id")
+          .eq("from_user_id", currentUserId);
+        
+        if (fallbackError) {
+          console.error("Error fetching likes:", fallbackError);
+          return;
+        }
+        
+        // Continue with fallback data (no duration)
+        if (!fallbackLikes || fallbackLikes.length === 0) {
+          setMatches([]);
+          return;
+        }
+        
+        const likedUserIds = fallbackLikes.map((l) => l.to_user_id);
+        
+        const { data: mutualLikes, error: mutualError } = await supabase
+          .from("user_likes")
+          .select("from_user_id, created_at")
+          .eq("to_user_id", currentUserId)
+          .in("from_user_id", likedUserIds);
+
+        if (mutualError || !mutualLikes || mutualLikes.length === 0) {
+          setMatches([]);
+          return;
+        }
+
+        const matchedUserIds = mutualLikes.map((l) => l.from_user_id);
+
+        const { data: matchedProfiles } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .in("user_id", matchedUserIds);
+
+        const matchesWithProfiles: MatchWithProfile[] = mutualLikes
+          .map((like): MatchWithProfile | null => {
+            const profile = matchedProfiles?.find((p) => p.user_id === like.from_user_id);
+            if (!profile) return null;
+            return {
+              user_id: currentUserId,
+              matched_with_user_id: like.from_user_id,
+              matched_at: like.created_at,
+              profile,
+            };
+          })
+          .filter((m): m is MatchWithProfile => m !== null)
+          .sort((a, b) => new Date(b.matched_at).getTime() - new Date(a.matched_at).getTime());
+
+        setMatches(matchesWithProfiles);
         return;
       }
 
@@ -302,9 +389,10 @@ export default function FeedClient({ user }: FeedClientProps) {
 
       const likedUserIds = myLikes.map((l) => l.to_user_id);
 
+      // Get their likes with call duration
       const { data: mutualLikes, error: mutualError } = await supabase
         .from("user_likes")
-        .select("from_user_id, created_at")
+        .select("from_user_id, created_at, call_duration_seconds")
         .eq("to_user_id", currentUserId)
         .in("from_user_id", likedUserIds);
 
@@ -330,17 +418,54 @@ export default function FeedClient({ user }: FeedClientProps) {
         return;
       }
 
+      // Get conversations for unread counts
+      const { data: conversations } = await supabase
+        .from("conversations")
+        .select("id, user1_id, user2_id")
+        .or(`user1_id.eq.${currentUserId},user2_id.eq.${currentUserId}`);
+
+      // Get unread message counts per conversation
+      const { data: unreadCounts } = await supabase
+        .from("messages")
+        .select("conversation_id")
+        .neq("sender_id", currentUserId)
+        .is("read_at", null);
+
+      // Count unreads per conversation
+      const unreadByConversation: Record<string, number> = {};
+      unreadCounts?.forEach((msg) => {
+        unreadByConversation[msg.conversation_id] = (unreadByConversation[msg.conversation_id] || 0) + 1;
+      });
+
       const matchesWithProfiles: MatchWithProfile[] = mutualLikes
-        .map((like) => {
+        .map((like): MatchWithProfile | null => {
           const profile = matchedProfiles?.find(
             (p) => p.user_id === like.from_user_id
           );
           if (!profile) return null;
+          
+          // Find my like to get my call duration
+          const myLike = myLikes.find((l) => l.to_user_id === like.from_user_id);
+          const myCallDuration = myLike?.call_duration_seconds || 0;
+          const theirCallDuration = like.call_duration_seconds || 0;
+
+          // Find conversation for this match
+          const conversation = conversations?.find(
+            (c) =>
+              (c.user1_id === currentUserId && c.user2_id === like.from_user_id) ||
+              (c.user2_id === currentUserId && c.user1_id === like.from_user_id)
+          );
+          
           return {
             user_id: currentUserId,
             matched_with_user_id: like.from_user_id,
             matched_at: like.created_at,
             profile,
+            my_call_duration_seconds: myCallDuration,
+            their_call_duration_seconds: theirCallDuration,
+            total_call_duration_seconds: myCallDuration + theirCallDuration,
+            conversation_id: conversation?.id,
+            unread_count: conversation ? (unreadByConversation[conversation.id] || 0) : 0,
           };
         })
         .filter((m): m is MatchWithProfile => m !== null)
@@ -348,6 +473,10 @@ export default function FeedClient({ user }: FeedClientProps) {
           (a, b) =>
             new Date(b.matched_at).getTime() - new Date(a.matched_at).getTime()
         );
+
+      // Calculate total unread count
+      const totalUnread = matchesWithProfiles.reduce((sum, m) => sum + (m.unread_count || 0), 0);
+      setTotalUnreadCount(totalUnread);
 
       setMatches(matchesWithProfiles);
     } catch (err) {
@@ -361,24 +490,245 @@ export default function FeedClient({ user }: FeedClientProps) {
     }
   }, [currentUserId, fetchMatches]);
 
+  // Get or create conversation for a match
+  const getOrCreateConversation = useCallback(
+    async (otherUserId: string): Promise<string | null> => {
+      if (!currentUserId) return null;
+
+      // Check if conversation exists
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("id")
+        .or(
+          `and(user1_id.eq.${currentUserId},user2_id.eq.${otherUserId}),and(user1_id.eq.${otherUserId},user2_id.eq.${currentUserId})`
+        )
+        .single();
+
+      if (existing) return existing.id;
+
+      // Create new conversation
+      const { data: newConv, error } = await supabase
+        .from("conversations")
+        .insert({
+          user1_id: currentUserId,
+          user2_id: otherUserId,
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("Error creating conversation:", error);
+        return null;
+      }
+
+      return newConv?.id || null;
+    },
+    [supabase, currentUserId]
+  );
+
+  // Fetch messages for a conversation
+  const fetchMessages = useCallback(
+    async (conversationId: string) => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching messages:", error);
+        return;
+      }
+
+      setMessages(data || []);
+
+      // Mark unread messages as read
+      if (currentUserId) {
+        await supabase
+          .from("messages")
+          .update({ read_at: new Date().toISOString() })
+          .eq("conversation_id", conversationId)
+          .neq("sender_id", currentUserId)
+          .is("read_at", null);
+
+        // Update unread count for this match
+        setMatches((prev) =>
+          prev.map((m) =>
+            m.conversation_id === conversationId ? { ...m, unread_count: 0 } : m
+          )
+        );
+        
+        // Recalculate total unread
+        setTotalUnreadCount((prev) => {
+          const match = matches.find((m) => m.conversation_id === conversationId);
+          return Math.max(0, prev - (match?.unread_count || 0));
+        });
+      }
+    },
+    [supabase, currentUserId, matches]
+  );
+
+  // Send a message
+  const sendMessage = useCallback(
+    async (conversationId: string, content: string) => {
+      if (!currentUserId || !content.trim()) return;
+
+      setSendingMessage(true);
+      try {
+        const { data, error } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            sender_id: currentUserId,
+            content: content.trim(),
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Error sending message:", error);
+          toast.error("Failed to send message");
+          return;
+        }
+
+        setMessages((prev) => [...prev, data]);
+        setNewMessage("");
+      } finally {
+        setSendingMessage(false);
+      }
+    },
+    [supabase, currentUserId]
+  );
+
+  // Subscribe to real-time messages when chat is open
+  useEffect(() => {
+    if (!showChat || !selectedMatch?.conversation_id) return;
+
+    const channel = supabase
+      .channel(`messages:${selectedMatch.conversation_id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${selectedMatch.conversation_id}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          // Only add if not from us (we already added it optimistically)
+          if (newMsg.sender_id !== currentUserId) {
+            setMessages((prev) => [...prev, newMsg]);
+            // Mark as read since we're viewing
+            supabase
+              .from("messages")
+              .update({ read_at: new Date().toISOString() })
+              .eq("id", newMsg.id);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [showChat, selectedMatch?.conversation_id, supabase, currentUserId]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Open chat for a match
+  const openChat = useCallback(
+    async (match: MatchWithProfile) => {
+      let conversationId: string | undefined = match.conversation_id;
+
+      if (!conversationId) {
+        const newConvId = await getOrCreateConversation(match.matched_with_user_id);
+        if (newConvId) {
+          conversationId = newConvId;
+          // Update match with conversation ID
+          setMatches((prev) =>
+            prev.map((m) =>
+              m.matched_with_user_id === match.matched_with_user_id
+                ? { ...m, conversation_id: conversationId }
+                : m
+            )
+          );
+          setSelectedMatch({ ...match, conversation_id: conversationId });
+        }
+      }
+
+      if (conversationId) {
+        await fetchMessages(conversationId);
+        setShowChat(true);
+      } else {
+        toast.error("Could not open chat");
+      }
+    },
+    [getOrCreateConversation, fetchMessages]
+  );
+
   // Save like to database
   const saveLike = useCallback(
-    async (toUserId: string): Promise<boolean> => {
+    async (toUserId: string, callDurationSeconds?: number): Promise<boolean> => {
       if (!currentUserId) {
         toast.error("Please log in to like profiles");
         return false;
       }
 
-      try {
-        const { error } = await supabase.from("user_likes").insert({
-          from_user_id: currentUserId,
-          to_user_id: toUserId,
-        });
+      const durationToSave = callDurationSeconds || 0;
+      console.log(`Saving like with duration: ${durationToSave} seconds`);
 
-        if (error) {
-          if (error.code === "23505") return true;
-          console.error("Error saving like:", error);
-          return false;
+      try {
+        // First check if like already exists
+        const { data: existingLike } = await supabase
+          .from("user_likes")
+          .select("id, call_duration_seconds")
+          .eq("from_user_id", currentUserId)
+          .eq("to_user_id", toUserId)
+          .single();
+
+        if (existingLike) {
+          // Update existing like - add to existing duration (multiple calls)
+          const newDuration = (existingLike.call_duration_seconds || 0) + durationToSave;
+          console.log(`Updating existing like ID: ${existingLike.id}`);
+          console.log(`Previous: ${existingLike.call_duration_seconds || 0}s, Adding: ${durationToSave}s, New total: ${newDuration}s`);
+          
+          const { data: updateData, error: updateError } = await supabase
+            .from("user_likes")
+            .update({ call_duration_seconds: newDuration })
+            .eq("id", existingLike.id)
+            .select();
+
+          console.log("Update response - data:", updateData, "error:", updateError);
+
+          if (updateError) {
+            console.error("Error updating like:", updateError);
+            return false;
+          }
+          
+          if (!updateData || updateData.length === 0) {
+            console.error("Update returned no data - RLS policy may be blocking update");
+          } else {
+            console.log("Like updated successfully, new value:", updateData[0]?.call_duration_seconds);
+          }
+        } else {
+          // Insert new like
+          console.log("Creating new like with duration:", durationToSave);
+          const { data, error } = await supabase.from("user_likes").insert({
+            from_user_id: currentUserId,
+            to_user_id: toUserId,
+            call_duration_seconds: durationToSave,
+          }).select();
+
+          console.log("Insert response - data:", data, "error:", error);
+
+          if (error) {
+            console.error("Error saving like:", error);
+            return false;
+          }
         }
 
         const { data: theirLike } = await supabase
@@ -407,6 +757,22 @@ export default function FeedClient({ user }: FeedClientProps) {
   );
 
   const endCall = useCallback(async () => {
+    console.log("endCall triggered, callStartTimeRef:", callStartTimeRef.current);
+    
+    // Calculate duration before ending session
+    let duration = 0;
+    if (callStartTimeRef.current) {
+      duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+      console.log(`Call ended. Duration: ${duration} seconds`);
+      callStartTimeRef.current = null;
+    } else {
+      console.warn("No call start time found - duration will be 0");
+    }
+    
+    // Store duration in ref (immediate, not async like state)
+    lastCallDurationRef.current = duration;
+    console.log("Duration stored in ref:", lastCallDurationRef.current);
+    
     await conversation.endSession();
     setShowDecisionModal(true);
   }, [conversation]);
@@ -425,6 +791,11 @@ export default function FeedClient({ user }: FeedClientProps) {
       return;
     }
 
+    // Set call start time immediately as a backup
+    // (onConnect should also set this, but just in case)
+    callStartTimeRef.current = Date.now();
+    console.log("startCall - timer started:", callStartTimeRef.current);
+
     try {
       await conversation.startSession({
         agentId: currentProfile.cloned_agent_id,
@@ -433,6 +804,7 @@ export default function FeedClient({ user }: FeedClientProps) {
     } catch (error: any) {
       console.error("Failed to start conversation:", error);
       toast.error("Could not access microphone or connect to agent");
+      callStartTimeRef.current = null; // Reset on error
     }
   }, [conversation, currentProfile, status, endCall]);
 
@@ -444,7 +816,8 @@ export default function FeedClient({ user }: FeedClientProps) {
       setSwipeDirection(decision === "yes" ? "right" : "left");
 
       if (decision === "yes") {
-        const saved = await saveLike(currentProfile.user_id);
+        console.log("Liking with duration from ref:", lastCallDurationRef.current);
+        const saved = await saveLike(currentProfile.user_id, lastCallDurationRef.current);
         if (saved) {
           toast.success(`You liked ${currentProfile.display_name}! 💕`);
         }
@@ -531,6 +904,16 @@ export default function FeedClient({ user }: FeedClientProps) {
     return `${diffDays}d ago`;
   };
 
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `${hours}h ${remainingMins}m`;
+  };
+
   const likesCount = Object.values(decisions).filter((d) => d === "yes").length;
 
   if (loading) {
@@ -572,10 +955,10 @@ export default function FeedClient({ user }: FeedClientProps) {
                 <div className="w-10 h-10 rounded-md bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors">
                   <Sparkles className="w-5 h-5 text-foreground" />
                 </div>
-                {matches.length > 0 && (
-                  <div className="absolute -top-2 -right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center border-2 border-background">
+                {(matches.length > 0 || totalUnreadCount > 0) && (
+                  <div className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center border-2 border-background ${totalUnreadCount > 0 ? 'bg-destructive' : 'bg-primary'}`}>
                     <span className="text-[10px] font-bold text-primary-foreground">
-                      {matches.length}
+                      {totalUnreadCount > 0 ? totalUnreadCount : matches.length}
                     </span>
                   </div>
                 )}
@@ -621,9 +1004,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                             key={match.matched_with_user_id}
                             className="w-full px-4 py-3 flex items-center gap-3 hover:bg-secondary/50 transition-colors"
                             onClick={() => {
-                              toast.info(
-                                `Chat with ${match.profile.display_name} coming soon!`
-                              );
+                              setSelectedMatch(match);
                               setShowMatchesDropdown(false);
                             }}
                           >
@@ -655,7 +1036,15 @@ export default function FeedClient({ user }: FeedClientProps) {
                                 Matched {formatMatchTime(match.matched_at)}
                               </p>
                             </div>
-                            <div className="w-2 h-2 bg-green-500 rounded-full" />
+                            {match.unread_count && match.unread_count > 0 ? (
+                              <div className="w-5 h-5 bg-destructive rounded-full flex items-center justify-center">
+                                <span className="text-[10px] font-bold text-white">
+                                  {match.unread_count}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="w-2 h-2 bg-green-500 rounded-full" />
+                            )}
                           </button>
                         ))}
                       </div>
@@ -758,7 +1147,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                     />
                     
                     {/* Voice Visualizer Overlay */}
-                    {status !== "idle" && status !== "disconnected" && (
+                    {status === "connected" || status === "connecting" ? (
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
                         {status !== "connected" ? (
                           <div className="text-center">
@@ -794,7 +1183,7 @@ export default function FeedClient({ user }: FeedClientProps) {
                           </div>
                         )}
                       </div>
-                    )}
+                    ) : null}
                     
                     {/* Name and Age overlay */}
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 z-20">
@@ -951,6 +1340,385 @@ export default function FeedClient({ user }: FeedClientProps) {
                 </button>
               </motion.div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Match Details Modal */}
+      <AnimatePresence>
+        {selectedMatch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background z-50 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 50, opacity: 0 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="min-h-screen"
+            >
+              {/* Header */}
+              <div className="sticky top-0 bg-background/80 backdrop-blur-md z-10 px-4 py-4 flex items-center gap-4 border-b border-border/40">
+                <button
+                  onClick={() => setSelectedMatch(null)}
+                  className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h1 className="text-lg font-semibold text-foreground">
+                    {selectedMatch.profile.display_name}
+                  </h1>
+                  <p className="text-xs text-muted-foreground">
+                    Matched {formatMatchTime(selectedMatch.matched_at)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Profile Photo / Avatar */}
+              <div
+                className={`h-72 ${
+                  CARD_COLORS[
+                    matches.indexOf(selectedMatch) % CARD_COLORS.length
+                  ]
+                } relative`}
+              >
+                {selectedMatch.profile.profile_photo_url ? (
+                  <img
+                    src={selectedMatch.profile.profile_photo_url}
+                    alt={selectedMatch.profile.display_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-8xl font-bold text-foreground/10">
+                      {selectedMatch.profile.display_name.charAt(0)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Profile Content */}
+              <div className="p-6 space-y-6">
+                {/* Name, Age, Location */}
+                <div>
+                  <h2 className="text-3xl font-bold text-foreground font-heading">
+                    {selectedMatch.profile.display_name},{" "}
+                    {selectedMatch.profile.age}
+                  </h2>
+                  {(selectedMatch.profile.location_city ||
+                    selectedMatch.profile.location_region) && (
+                    <p className="text-muted-foreground flex items-center gap-1 mt-1">
+                      <MapPin className="w-4 h-4" />
+                      {selectedMatch.profile.location_city}
+                      {selectedMatch.profile.location_region &&
+                        `, ${selectedMatch.profile.location_region}`}
+                    </p>
+                  )}
+                </div>
+
+                {/* Tags */}
+                {selectedMatch.profile.onboarding_tags &&
+                  selectedMatch.profile.onboarding_tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedMatch.profile.onboarding_tags.map((tag, i) => (
+                        <span
+                          key={i}
+                          className="px-3 py-1.5 bg-primary/10 text-primary rounded-full text-sm font-medium"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                {/* Bio / Summary */}
+                {(selectedMatch.profile.bio ||
+                  selectedMatch.profile.onboarding_summary) && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      About
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.bio ||
+                        selectedMatch.profile.onboarding_summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Profile Description (from AI analysis) */}
+                {selectedMatch.profile.user_profile_prompt && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Personality
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_profile_prompt}
+                    </p>
+                  </div>
+                )}
+
+                {/* What they're looking for */}
+                {selectedMatch.profile.user_preferences_prompt && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Looking For
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_preferences_prompt}
+                    </p>
+                  </div>
+                )}
+
+                {/* Important Notes */}
+                {selectedMatch.profile.user_important_notes && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                      Good to Know
+                    </h3>
+                    <p className="text-foreground leading-relaxed">
+                      {selectedMatch.profile.user_important_notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* Talk Time Stats */}
+                {(selectedMatch.total_call_duration_seconds ?? 0) > 0 && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                      Time Spent Talking
+                    </h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Clock className="w-5 h-5 text-primary" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.my_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">You</p>
+                      </div>
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Clock className="w-5 h-5 text-primary" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.their_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedMatch.profile.display_name.split(" ")[0]}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Heart className="w-5 h-5 text-primary-foreground" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.total_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Total</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Match Info */}
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                    <Calendar className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">
+                      You matched on
+                    </p>
+                    <p className="font-medium text-foreground">
+                      {new Date(selectedMatch.matched_at).toLocaleDateString(
+                        "en-US",
+                        {
+                          weekday: "long",
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        }
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => {
+                      if (selectedMatch.profile.cloned_agent_id) {
+                        setSelectedMatch(null);
+                        // Find this profile in the main list and start a call
+                        const profileIndex = profiles.findIndex(
+                          (p) => p.user_id === selectedMatch.profile.user_id
+                        );
+                        if (profileIndex !== -1) {
+                          setCurrentIndex(profileIndex);
+                          setTimeout(() => toggleCall(), 100);
+                        } else {
+                          toast.info("Talk to their agent from the feed!");
+                        }
+                      } else {
+                        toast.error("Agent not available");
+                      }
+                    }}
+                    className="flex-1 py-4 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Mic className="w-5 h-5" />
+                    Talk
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedMatch) {
+                        openChat(selectedMatch);
+                      }
+                    }}
+                    className="flex-1 py-4 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <MessageCircle className="w-5 h-5" />
+                    Message
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Chat Modal */}
+      <AnimatePresence>
+        {showChat && selectedMatch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background z-[60] flex flex-col"
+          >
+            {/* Chat Header */}
+            <div className="bg-background/80 backdrop-blur-md px-4 py-4 flex items-center gap-4 border-b border-border/40">
+              <button
+                onClick={() => {
+                  setShowChat(false);
+                  setMessages([]);
+                }}
+                className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center hover:bg-secondary/80 transition-colors"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  CARD_COLORS[matches.indexOf(selectedMatch) % CARD_COLORS.length]
+                }`}
+              >
+                {selectedMatch.profile.profile_photo_url ? (
+                  <img
+                    src={selectedMatch.profile.profile_photo_url}
+                    alt={selectedMatch.profile.display_name}
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                ) : (
+                  <span className="text-sm font-semibold text-foreground/60">
+                    {selectedMatch.profile.display_name.charAt(0)}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1">
+                <h1 className="font-semibold text-foreground">
+                  {selectedMatch.profile.display_name}
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  Matched {formatMatchTime(selectedMatch.matched_at)}
+                </p>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                    <MessageCircle className="w-8 h-8 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-foreground mb-1">
+                    Start the conversation
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-xs">
+                    Say hi to {selectedMatch.profile.display_name}! You matched
+                    because you both liked each other.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex ${
+                        msg.sender_id === currentUserId
+                          ? "justify-end"
+                          : "justify-start"
+                      }`}
+                    >
+                      <div
+                        className={`max-w-[75%] px-4 py-2 rounded-2xl ${
+                          msg.sender_id === currentUserId
+                            ? "bg-primary text-primary-foreground rounded-br-md"
+                            : "bg-secondary text-foreground rounded-bl-md"
+                        }`}
+                      >
+                        <p className="text-sm">{msg.content}</p>
+                        <p
+                          className={`text-[10px] mt-1 ${
+                            msg.sender_id === currentUserId
+                              ? "text-primary-foreground/60"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {new Date(msg.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </>
+              )}
+            </div>
+
+            {/* Message Input */}
+            <div className="p-4 border-t border-border/40 bg-background">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (selectedMatch.conversation_id && newMessage.trim()) {
+                    sendMessage(selectedMatch.conversation_id, newMessage);
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  type="text"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type a message..."
+                  className="flex-1 px-4 py-3 bg-secondary rounded-full text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={sendingMessage || !newMessage.trim()}
+                  className="w-12 h-12 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-full flex items-center justify-center transition-colors"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
