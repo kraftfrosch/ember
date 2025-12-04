@@ -15,6 +15,7 @@ import {
   Calendar,
   MessageCircle,
   ArrowLeft,
+  Clock,
 } from "lucide-react";
 import { useConversation } from "@elevenlabs/react";
 import { createSupabaseClient } from "@/lib/supabase-client";
@@ -67,6 +68,8 @@ export default function FeedClient({ user }: FeedClientProps) {
   const [selectedMatch, setSelectedMatch] = useState<MatchWithProfile | null>(
     null
   );
+  const callStartTimeRef = useRef<number | null>(null);
+  const lastCallDurationRef = useRef<number>(0);
   const matchesDropdownRef = useRef<HTMLDivElement>(null);
 
   const supabase = createSupabaseClient();
@@ -77,11 +80,14 @@ export default function FeedClient({ user }: FeedClientProps) {
   // ElevenLabs conversation hook
   const conversation = useConversation({
     onConnect: () => {
-      console.log("Connected to agent");
+      console.log("Connected to agent - starting timer");
+      callStartTimeRef.current = Date.now();
+      console.log("Call start time set:", callStartTimeRef.current);
       toast.success(`Connected to ${currentProfile?.display_name}'s agent`);
     },
     onDisconnect: () => {
-      console.log("Disconnected from agent");
+      console.log("Disconnected from agent, callStartTimeRef:", callStartTimeRef.current);
+      // Duration is now calculated in endCall, so we just log here
     },
     onError: (error) => {
       console.error("Conversation error:", error);
@@ -296,13 +302,66 @@ export default function FeedClient({ user }: FeedClientProps) {
     if (!currentUserId) return;
 
     try {
+      // Get my likes with call duration
       const { data: myLikes, error: likesError } = await supabase
         .from("user_likes")
-        .select("to_user_id")
+        .select("to_user_id, call_duration_seconds")
         .eq("from_user_id", currentUserId);
 
       if (likesError) {
-        console.error("Error fetching likes:", likesError);
+        // Fallback: try without call_duration_seconds column (if it doesn't exist yet)
+        console.warn("Fetching likes with duration failed, trying without:", likesError);
+        const { data: fallbackLikes, error: fallbackError } = await supabase
+          .from("user_likes")
+          .select("to_user_id")
+          .eq("from_user_id", currentUserId);
+        
+        if (fallbackError) {
+          console.error("Error fetching likes:", fallbackError);
+          return;
+        }
+        
+        // Continue with fallback data (no duration)
+        if (!fallbackLikes || fallbackLikes.length === 0) {
+          setMatches([]);
+          return;
+        }
+        
+        const likedUserIds = fallbackLikes.map((l) => l.to_user_id);
+        
+        const { data: mutualLikes, error: mutualError } = await supabase
+          .from("user_likes")
+          .select("from_user_id, created_at")
+          .eq("to_user_id", currentUserId)
+          .in("from_user_id", likedUserIds);
+
+        if (mutualError || !mutualLikes || mutualLikes.length === 0) {
+          setMatches([]);
+          return;
+        }
+
+        const matchedUserIds = mutualLikes.map((l) => l.from_user_id);
+
+        const { data: matchedProfiles } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .in("user_id", matchedUserIds);
+
+        const matchesWithProfiles: MatchWithProfile[] = mutualLikes
+          .map((like): MatchWithProfile | null => {
+            const profile = matchedProfiles?.find((p) => p.user_id === like.from_user_id);
+            if (!profile) return null;
+            return {
+              user_id: currentUserId,
+              matched_with_user_id: like.from_user_id,
+              matched_at: like.created_at,
+              profile,
+            };
+          })
+          .filter((m): m is MatchWithProfile => m !== null)
+          .sort((a, b) => new Date(b.matched_at).getTime() - new Date(a.matched_at).getTime());
+
+        setMatches(matchesWithProfiles);
         return;
       }
 
@@ -313,9 +372,10 @@ export default function FeedClient({ user }: FeedClientProps) {
 
       const likedUserIds = myLikes.map((l) => l.to_user_id);
 
+      // Get their likes with call duration
       const { data: mutualLikes, error: mutualError } = await supabase
         .from("user_likes")
-        .select("from_user_id, created_at")
+        .select("from_user_id, created_at, call_duration_seconds")
         .eq("to_user_id", currentUserId)
         .in("from_user_id", likedUserIds);
 
@@ -342,16 +402,25 @@ export default function FeedClient({ user }: FeedClientProps) {
       }
 
       const matchesWithProfiles: MatchWithProfile[] = mutualLikes
-        .map((like) => {
+        .map((like): MatchWithProfile | null => {
           const profile = matchedProfiles?.find(
             (p) => p.user_id === like.from_user_id
           );
           if (!profile) return null;
+          
+          // Find my like to get my call duration
+          const myLike = myLikes.find((l) => l.to_user_id === like.from_user_id);
+          const myCallDuration = myLike?.call_duration_seconds || 0;
+          const theirCallDuration = like.call_duration_seconds || 0;
+          
           return {
             user_id: currentUserId,
             matched_with_user_id: like.from_user_id,
             matched_at: like.created_at,
             profile,
+            my_call_duration_seconds: myCallDuration,
+            their_call_duration_seconds: theirCallDuration,
+            total_call_duration_seconds: myCallDuration + theirCallDuration,
           };
         })
         .filter((m): m is MatchWithProfile => m !== null)
@@ -374,22 +443,63 @@ export default function FeedClient({ user }: FeedClientProps) {
 
   // Save like to database
   const saveLike = useCallback(
-    async (toUserId: string): Promise<boolean> => {
+    async (toUserId: string, callDurationSeconds?: number): Promise<boolean> => {
       if (!currentUserId) {
         toast.error("Please log in to like profiles");
         return false;
       }
 
-      try {
-        const { error } = await supabase.from("user_likes").insert({
-          from_user_id: currentUserId,
-          to_user_id: toUserId,
-        });
+      const durationToSave = callDurationSeconds || 0;
+      console.log(`Saving like with duration: ${durationToSave} seconds`);
 
-        if (error) {
-          if (error.code === "23505") return true;
-          console.error("Error saving like:", error);
-          return false;
+      try {
+        // First check if like already exists
+        const { data: existingLike } = await supabase
+          .from("user_likes")
+          .select("id, call_duration_seconds")
+          .eq("from_user_id", currentUserId)
+          .eq("to_user_id", toUserId)
+          .single();
+
+        if (existingLike) {
+          // Update existing like - add to existing duration (multiple calls)
+          const newDuration = (existingLike.call_duration_seconds || 0) + durationToSave;
+          console.log(`Updating existing like ID: ${existingLike.id}`);
+          console.log(`Previous: ${existingLike.call_duration_seconds || 0}s, Adding: ${durationToSave}s, New total: ${newDuration}s`);
+          
+          const { data: updateData, error: updateError } = await supabase
+            .from("user_likes")
+            .update({ call_duration_seconds: newDuration })
+            .eq("id", existingLike.id)
+            .select();
+
+          console.log("Update response - data:", updateData, "error:", updateError);
+
+          if (updateError) {
+            console.error("Error updating like:", updateError);
+            return false;
+          }
+          
+          if (!updateData || updateData.length === 0) {
+            console.error("Update returned no data - RLS policy may be blocking update");
+          } else {
+            console.log("Like updated successfully, new value:", updateData[0]?.call_duration_seconds);
+          }
+        } else {
+          // Insert new like
+          console.log("Creating new like with duration:", durationToSave);
+          const { data, error } = await supabase.from("user_likes").insert({
+            from_user_id: currentUserId,
+            to_user_id: toUserId,
+            call_duration_seconds: durationToSave,
+          }).select();
+
+          console.log("Insert response - data:", data, "error:", error);
+
+          if (error) {
+            console.error("Error saving like:", error);
+            return false;
+          }
         }
 
         const { data: theirLike } = await supabase
@@ -425,6 +535,11 @@ export default function FeedClient({ user }: FeedClientProps) {
     }
 
     setIsCallModalOpen(true);
+    
+    // Set call start time immediately as a backup
+    // (onConnect should also set this, but just in case)
+    callStartTimeRef.current = Date.now();
+    console.log("startCall - timer started:", callStartTimeRef.current);
 
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -436,10 +551,27 @@ export default function FeedClient({ user }: FeedClientProps) {
       console.error("Failed to start conversation:", error);
       toast.error("Could not access microphone or connect to agent");
       setIsCallModalOpen(false);
+      callStartTimeRef.current = null; // Reset on error
     }
   }, [conversation, currentProfile]);
 
   const endCall = useCallback(async () => {
+    console.log("endCall triggered, callStartTimeRef:", callStartTimeRef.current);
+    
+    // Calculate duration before ending session
+    let duration = 0;
+    if (callStartTimeRef.current) {
+      duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+      console.log(`Call ended. Duration: ${duration} seconds`);
+      callStartTimeRef.current = null;
+    } else {
+      console.warn("No call start time found - duration will be 0");
+    }
+    
+    // Store duration in ref (immediate, not async like state)
+    lastCallDurationRef.current = duration;
+    console.log("Duration stored in ref:", lastCallDurationRef.current);
+    
     await conversation.endSession();
     setIsCallModalOpen(false);
     setShowDecisionModal(true);
@@ -453,7 +585,8 @@ export default function FeedClient({ user }: FeedClientProps) {
       setSwipeDirection(decision === "yes" ? "right" : "left");
 
       if (decision === "yes") {
-        const saved = await saveLike(currentProfile.user_id);
+        console.log("Liking with duration from ref:", lastCallDurationRef.current);
+        const saved = await saveLike(currentProfile.user_id, lastCallDurationRef.current);
         if (saved) {
           toast.success(`You liked ${currentProfile.display_name}! 💕`);
         }
@@ -538,6 +671,16 @@ export default function FeedClient({ user }: FeedClientProps) {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays === 1) return "Yesterday";
     return `${diffDays}d ago`;
+  };
+
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    const remainingMins = mins % 60;
+    return `${hours}h ${remainingMins}m`;
   };
 
   const likesCount = Object.values(decisions).filter((d) => d === "yes").length;
@@ -1225,6 +1368,46 @@ export default function FeedClient({ user }: FeedClientProps) {
                     <p className="text-foreground leading-relaxed">
                       {selectedMatch.profile.user_important_notes}
                     </p>
+                  </div>
+                )}
+
+                {/* Talk Time Stats */}
+                {(selectedMatch.total_call_duration_seconds ?? 0) > 0 && (
+                  <div className="bg-secondary/50 rounded-xl p-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                      Time Spent Talking
+                    </h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Clock className="w-5 h-5 text-primary" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.my_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">You</p>
+                      </div>
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Clock className="w-5 h-5 text-primary" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.their_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedMatch.profile.display_name.split(" ")[0]}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center mx-auto mb-2">
+                          <Heart className="w-5 h-5 text-primary-foreground" />
+                        </div>
+                        <p className="text-lg font-bold text-foreground">
+                          {formatDuration(selectedMatch.total_call_duration_seconds || 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Total</p>
+                      </div>
+                    </div>
                   </div>
                 )}
 
